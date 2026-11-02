@@ -3,7 +3,8 @@ const Peer = PeerModule.Peer || PeerModule;
 import { makeMonsterEvent, monsterSlot, seedFrom } from "./chaos-rules.js";
 
 export const MAX_PLAYERS = 6;
-const PREFIX = "tokyo-run-v1-";
+// Keep older cached clients out of races with the new shared hazard rules.
+const PREFIX = "tokyo-run-v2-";
 export const cleanName = (value) =>
   String(typeof value === "string" ? value : "Driver")
     .replace(/[<>\x00-\x1f]/g, "")
@@ -126,7 +127,7 @@ export class Lobby {
         e.type === "unavailable-id"
           ? "Room code is in use. Create another lobby."
           : e.type === "peer-unavailable"
-            ? "Room not found. Check the code and make sure the host is online."
+            ? "Room not found. Refresh both browsers, check the code, and make sure the host is online."
             : "Multiplayer connection failed. Try another network or create a new lobby.",
       ),
     );
