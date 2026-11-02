@@ -98,6 +98,19 @@ try {
   assert.equal((await state(host)).screen, "results");
   assert.equal((await state(guest)).screen, "drive");
   console.log("Finish results broadcast while other driver continues racing");
+  for (let i = 1; i <= 21; i++) {
+    await guest.evaluate((i) => gameQA.teleport(...gameQA.route[i]), i);
+    await guest.waitForFunction((i) => gameQA.getState().cp === i, i);
+    await guest.waitForTimeout(180);
+  }
+  await host.waitForFunction(() =>
+    gameQA
+      .getState()
+      .online.players.some((p) => p.name === "Friend" && p.finish > 0),
+  );
+  assert.equal((await state(guest)).screen, "results");
+  console.log("Guest checkpoint progress and finish validated by host");
+
   await host.locator("[data-action=return-lobby]").click();
   await guest.waitForFunction(() => gameQA.getState().screen === "lobby");
   assert.equal(

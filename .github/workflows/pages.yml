@@ -15,6 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out game
         uses: actions/checkout@v4
@@ -38,6 +39,11 @@ jobs:
             sleep 1
           done
           npm run test:multiplayer
+      - name: Test public multiplayer signaling
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+          TEST_PUBLIC_PEER: "1"
+        run: npm run test:multiplayer
       - name: Build game
         run: npm run build
       - name: Upload website
