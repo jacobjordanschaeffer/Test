@@ -53,6 +53,24 @@ try {
     await host.locator("[data-action=start-online]").isDisabled(),
     true,
   );
+  await guest.locator("#lobby-name").fill("New Friend");
+  await guest.locator("[data-action=save-name]").click();
+  await host.waitForFunction(() =>
+    gameQA.getState().online.players.some((p) => p.name === "New Friend"),
+  );
+  await guest.locator("#lobby-name").fill("Friend");
+  await guest.locator("[data-action=save-name]").click();
+  await host.locator("#lobby-name").fill("New Host");
+  await host.locator("[data-action=save-name]").click();
+  await guest.waitForFunction(() =>
+    gameQA.getState().online.players.some((p) => p.name === "New Host"),
+  );
+  await host.locator("#lobby-name").fill("Host");
+  await host.locator("[data-action=save-name]").click();
+  await guest.waitForFunction(() =>
+    gameQA.getState().online.players.some((p) => p.name === "Host"),
+  );
+  console.log("Guest and host name changes synchronize in the lobby");
   await guest.locator("[data-action=ready]").click();
   await host.waitForFunction(() =>
     gameQA.getState().online.players.every((p) => p.ready),
@@ -79,6 +97,18 @@ try {
   assert.equal((await state(guest)).online.remotes, 1);
   await guest.evaluate(() => gameQA.renderFrame());
   console.log("Remote truck movement synchronized and rendered");
+  assert.deepEqual(
+    (await state(host)).chaos.hazards,
+    (await state(guest)).chaos.hazards,
+  );
+  await host.evaluate(() => gameQA.monster());
+  await guest.waitForFunction(() => gameQA.getState().chaos.event?.id === 0);
+  assert.deepEqual(
+    (await state(host)).chaos.event,
+    (await state(guest)).chaos.event,
+  );
+  console.log("Hazard layout and monster attacks synchronize across browsers");
+
   await host.keyboard.press("Escape");
   const before = (await state(host)).elapsed;
   await host.waitForTimeout(1000);

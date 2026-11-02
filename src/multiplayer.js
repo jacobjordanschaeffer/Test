@@ -1,5 +1,6 @@
 import PeerModule from "peerjs";
 const Peer = PeerModule.Peer || PeerModule;
+import { makeMonsterEvent, monsterSlot, seedFrom } from "./chaos-rules.js";
 
 export const MAX_PLAYERS = 6;
 const PREFIX = "tokyo-run-v1-";
@@ -192,6 +193,14 @@ export class Lobby {
           this.broadcast();
           this.onChange();
         }
+        if (message.type === "rename" && this.phase === "lobby") {
+          const p = this.players[c.peer];
+          if (p) {
+            p.name = cleanName(message.name);
+            this.broadcast();
+            this.onChange();
+          }
+        }
         if (message.type === "sync")
           c.send({ type: "clock", sent: message.sent, now: Date.now() });
         const player = this.players[c.peer];
@@ -295,6 +304,35 @@ export class Lobby {
     for (const c of this.connections.values())
       if (c.open) c.send({ type: "sync", sent: Date.now() });
   }
+  rename(name) {
+    if (this.phase !== "lobby") return;
+    name = cleanName(name);
+    if (this.isHost) {
+      this.players[this.id].name = name;
+      this.broadcast();
+      this.onChange();
+    } else
+      for (const c of this.connections.values())
+        if (c.open) c.send({ type: "rename", name });
+  }
+  triggerMonster(force = false) {
+    if (!this.isHost || this.phase !== "race") return;
+    const seconds = (Date.now() - this.race.startAt) / 1000;
+    const slot = force
+      ? Math.max(0, monsterSlot(seconds))
+      : monsterSlot(seconds);
+    if (slot < 0 || this.race.chaos?.id >= slot) return;
+    const leader = this.roster
+      .filter((p) => p.state && !p.finish)
+      .sort((a, b) => b.state.cp - a.state.cp)[0];
+    if (!leader && !force) return;
+    this.race.chaos = makeMonsterEvent(
+      slot,
+      Math.max(0, seconds),
+      leader?.state,
+    );
+    this.broadcast();
+  }
   ready(value) {
     if (this.isHost) return;
     for (const c of this.connections.values())
@@ -313,6 +351,7 @@ export class Lobby {
       startAt: Date.now() + 4500,
       lighting,
     };
+    this.race.seed = seedFrom(this.race.id);
     this.phase = "race";
     for (const p of this.roster) {
       p.state = null;
@@ -348,8 +387,10 @@ export class Lobby {
   }
   tick() {
     if (this.closed) return;
-    if (this.isHost) this.broadcast();
-    else if (this.phase === "race" && this.localState)
+    if (this.isHost) {
+      this.triggerMonster();
+      this.broadcast();
+    } else if (this.phase === "race" && this.localState)
       for (const c of this.connections.values())
         if (c.open)
           c.send({ type: "state", race: this.race.id, state: this.localState });

@@ -38,6 +38,7 @@ jobs:
             if curl -fsS http://localhost:5173/ > /dev/null && curl -fsS http://localhost:9000/peerjs/peerjs/id > /dev/null; then break; fi
             sleep 1
           done
+          npm run test:chaos
           npm run test:multiplayer
       - name: Test public multiplayer signaling
         env:

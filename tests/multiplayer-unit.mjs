@@ -120,3 +120,50 @@ test("lobby admits six drivers, rejects overflow, and locks after race starts", 
     for (const c of connections) c.close();
   }
 });
+
+test("lobby renaming and host-controlled monster schedule preserve shared race state", () => {
+  const room = new Lobby();
+  room.isHost = true;
+  room.id = "host";
+  room.phase = "lobby";
+  room.players = {
+    host: {
+      id: "host",
+      name: "Host",
+      ready: true,
+      state: { x: 0, z: -30, cp: 0 },
+    },
+    guest: {
+      id: "guest",
+      name: "Friend",
+      ready: true,
+      state: { x: 0, z: 7, cp: 0 },
+    },
+  };
+  const connection = new Connection("guest");
+  try {
+    room.attach(connection);
+    connection.emit("open");
+    room.rename("Road Captain");
+    assert.equal(room.players.host.name, "Road Captain");
+    connection.emit("data", { type: "rename", name: "<New Friend>" });
+    assert.equal(room.players.guest.name, "New Friend");
+    assert.equal(room.players.guest.ready, true);
+    assert.ok(room.begin());
+    room.race.startAt = Date.now() - 20000;
+    room.players.host.state = { x: 0, z: -30, cp: 0 };
+    room.triggerMonster();
+    assert.equal(room.race.chaos.id, 0);
+    const event = room.race.chaos;
+    room.triggerMonster();
+    assert.deepEqual(room.race.chaos, event);
+    connection.emit("data", { type: "rename", name: "During race" });
+    assert.equal(room.players.guest.name, "New Friend");
+    room.race.startAt = Date.now() - 62000;
+    room.triggerMonster();
+    assert.equal(room.race.chaos.id, 1);
+  } finally {
+    room.close();
+    connection.close();
+  }
+});

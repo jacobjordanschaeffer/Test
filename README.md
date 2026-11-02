@@ -72,3 +72,19 @@ Single-player remains offline-capable after assets load. Multiplayer needs the p
 Start `npm run dev -- --port 5173` and `npm run signal:test` in separate terminals. Then run `npm run test:multiplayer` with an installed Chromium browser (`CHROMIUM_PATH` can override its path). The test uses independent browser contexts, a real local PeerServer, and real WebRTC data channels to check joining, readiness, shared countdown, remote motion/rendering, pause timing, finishing, rematch, and host departure. The QA `simulation` flag skips repeated GPU rendering during network simulation; one explicit frame verifies the remote truck can render. Normal gameplay always renders.
 
 The GitHub Pages workflow runs the multiplayer browser suite on GitHub's hosted runner with both local and public signaling before deploying. The managed cloud onboarding browser disables non-proxied WebRTC UDP by policy, so it cannot complete this end-to-end test locally; its passing unit checks are distinct from the hosted browser result. Set `TEST_PUBLIC_PEER=1` to test the same browser flow using the public signaling service instead of the local server, where network policy permits.
+
+## Arcade chaos update
+
+Drivers can type their own name before creating or joining a room, or change it with **Your driver name → Save name** inside the lobby. Names are remembered in that browser and synchronized to the roster and standings. Names can be edited until the race starts.
+
+Every district now has interactive arcade hazards:
+
+- **Cyan boost pads:** a temporary acceleration and top-speed boost.
+- **Potholes:** a speed penalty and suspension/camera bounce.
+- **Oil slicks:** reduced tire grip for a short period; ease off the steering.
+- **Striped roadblocks:** solid partial-lane barriers with room to pass.
+- **Godzilla events:** an original procedural kaiju appears alongside the road. Amber rings warn where rubble will fall. Dodge the rubble and expanding atomic shockwave. The event clears after fourteen seconds, and another can happen about forty-two seconds later.
+
+Chaos is enabled in both solo modes and friend races. Multiplayer uses a shared course seed and host-broadcast monster event positions/timestamps. The host targets the leading checkpoint area, and every browser sees the same attack; vehicle impacts are simulated locally as part of casual racing. Boosts, oil, and impacts expire; warnings give drivers a chance to dodge, and roadblocks leave a passing lane.
+
+`npm test` includes deterministic hazard generation, effect duration/cooldown, host scheduling, name editing, and network message checks. With Vite running, `npm run test:chaos` exercises actual truck boost speed, pothole/oil effects, roadblock collision, monster warnings, and rubble rendering/impact. The hosted multiplayer suite also checks name changes and identical hazard/event data across independent browsers before deployment.

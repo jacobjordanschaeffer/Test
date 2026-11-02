@@ -7,10 +7,11 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node tests/physics.test.js && node tests/multiplayer-unit.mjs",
+    "test": "node tests/physics.test.js && node tests/multiplayer-unit.mjs && node tests/chaos-unit.mjs",
     "test:browser": "node tests/browser.mjs",
     "test:multiplayer": "node tests/multiplayer.mjs",
-    "signal:test": "peerjs --port 9000 --path /peerjs"
+    "signal:test": "peerjs --port 9000 --path /peerjs",
+    "test:chaos": "node tests/chaos-browser.mjs"
   },
   "dependencies": {
     "@fontsource/barlow-condensed": "^5.3.0",

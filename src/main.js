@@ -9,6 +9,9 @@ import { makeTruck, trucks, paints } from "./trucks.js";
 import { buildWorld, pedestrians } from "./world.js";
 import { Sound } from "./audio.js";
 import { drive } from "./physics.js";
+import { ChaosCourse } from "./chaos.js";
+import { seedFrom, makeMonsterEvent, monsterSlot } from "./chaos-rules.js";
+import { indexCollisions } from "./route.js";
 import { Lobby, cleanCode, cleanName, MAX_PLAYERS } from "./multiplayer.js";
 import { RemoteTrucks } from "./remote-trucks.js";
 const app = document.querySelector("#app"),
@@ -68,6 +71,38 @@ let screen = "home",
 try {
   best = Number(localStorage.getItem("tokyo-run-best")) || null;
 } catch {}
+let preferredName = "Driver";
+try {
+  preferredName = cleanName(localStorage.getItem("tokyo-run-name"));
+} catch {}
+function rememberName(name) {
+  preferredName = cleanName(name);
+  try {
+    localStorage.setItem("tokyo-run-name", preferredName);
+  } catch {}
+}
+const chaos = new ChaosCourse(scene);
+let collisionBoxes = indexCollisions([...world.boxes, ...chaos.blocks]),
+  monsterNotice = -1;
+function rebuildChaos(seed) {
+  chaos.build(seed);
+  collisionBoxes = indexCollisions([...world.boxes, ...chaos.blocks]);
+  monsterNotice = -1;
+}
+function chaosTime() {
+  return lobby?.race ? Math.max(0, (lobby.now - raceStartAt) / 1000) : elapsed;
+}
+function hazardFeedback(type) {
+  const messages = {
+    boost: "BOOST! + SPEED",
+    pothole: "POTHOLE! Hold your line",
+    oil: "OIL SLICK! Ease off the steering",
+    rubble: "GODZILLA RUBBLE!",
+    shockwave: "ATOMIC SHOCKWAVE!",
+  };
+  toast(messages[type] || type);
+  sound.beep(type === "boost" ? 1000 : 75, 0.18);
+}
 const keys = new Set(),
   position = new T.Vector3(0, 0, 7),
   velocity = new T.Vector2();
@@ -128,6 +163,7 @@ function lobbyChanged() {
 function connectLobby(host) {
   const name = cleanName(document.querySelector("#driver-name")?.value);
   const code = cleanCode(document.querySelector("#room-code")?.value);
+  rememberName(name);
   leaveLobby();
   screen = "lobby";
   paused = true;
@@ -242,9 +278,11 @@ function reset() {
   yaw = Math.atan2(-(next[0] - p[0]), -(next[1] - p[1]));
   speed = 0;
   velocity.set(0, 0);
+  chaos.effects.reset();
 }
 function start(m) {
   mode = m;
+  rebuildChaos(lobby?.race?.seed ?? seedFrom(Date.now()));
   cp = 0;
   elapsed = 0;
   countdown = m === "race" ? 3.5 : 0;
@@ -271,8 +309,15 @@ function button(text, action, primary = false) {
   return `<button data-action="${action}" class="${primary ? "primary" : ""}">${text}</button>`;
 }
 function renderUI() {
+  const nameDraft =
+    document.activeElement?.id === "lobby-name"
+      ? {
+          value: document.activeElement.value,
+          caret: document.activeElement.selectionStart,
+        }
+      : null;
   if (screen === "drive" && !paused) {
-    app.innerHTML = `<div class="hud"><div class="hud-top"><div class="location"><span id="mode-label">${mode === "race" ? "TOKYO RUN / CHECKPOINT 01" : "FREE ROAM / NO WRONG TURNS"}</span><strong id="district">Temple District</strong></div><div class="timer"><small>${mode === "race" ? "ELAPSED TIME" : "THE CITY IS YOURS"}</small><span id="timer">${mode === "race" ? "00:00.00" : "東京散歩"}</span></div></div><canvas class="map ${minimap ? "" : "hidden"}" width="380" height="450"></canvas><div class="camera-label">C · <span id="camera-name">${cameraNames[cameraMode]}</span></div><div class="speed"><div class="gear" id="gear">N</div><b id="speed">0</b> <span>KM/H</span></div><div class="hint">WASD DRIVE &nbsp; SPACE HANDBRAKE &nbsp; R RESET &nbsp; ESC PAUSE</div><div class="countdown"></div>${lobby?.active ? '<aside class="standings-panel"><div class="eyebrow">FRIENDS / LIVE STANDINGS</div><div id="standings"></div></aside>' : ""}</div>`;
+    app.innerHTML = `<div class="hud"><div class="hud-top"><div class="location"><span id="mode-label">${mode === "race" ? "TOKYO RUN / CHECKPOINT 01" : "FREE ROAM / NO WRONG TURNS"}</span><strong id="district">Temple District</strong></div><div class="timer"><small>${mode === "race" ? "ELAPSED TIME" : "THE CITY IS YOURS"}</small><span id="timer">${mode === "race" ? "00:00.00" : "東京散歩"}</span></div></div><canvas class="map ${minimap ? "" : "hidden"}" width="380" height="450"></canvas><div class="camera-label">C · <span id="camera-name">${cameraNames[cameraMode]}</span></div><div class="speed"><div class="gear" id="gear">N</div><b id="speed">0</b> <span>KM/H</span></div><div class="hint">WASD DRIVE &nbsp; SPACE HANDBRAKE &nbsp; R RESET &nbsp; ESC PAUSE</div><div class="countdown"></div><div class="chaos-status" id="chaos-status"></div>${lobby?.active ? '<aside class="standings-panel"><div class="eyebrow">FRIENDS / LIVE STANDINGS</div><div id="standings"></div></aside>' : ""}</div>`;
     return;
   }
   let content = "";
@@ -292,13 +337,13 @@ function renderUI() {
         "",
       )}<div class="actions">${button("Take it for a drive ↗", "free", true)}${button("Back", "back")}</div>`;
   if (screen === "online")
-    content = `<div class="eyebrow">KEI TRUCK CLUB / UP TO ${MAX_PLAYERS} DRIVERS</div><h2>Bring your crew.</h2><p class="subtitle">Create a room, share the link, and race from the temple to the tower together.</p><label class="field">Your name<input id="driver-name" maxlength="18" value="Driver" autocomplete="nickname"></label><div class="actions">${button("Create a lobby →", "create-room", true)}</div><div class="join-row"><input id="room-code" maxlength="7" placeholder="ROOM CODE" aria-label="Room code" value="${inviteCode}">${button("Join room", "join-room")}</div><p class="online-error" role="status">${escapeHTML(onlineError)}</p><p class="help">Choose your truck and paint in the Garage first.<br>Host stays online. The race continues while paused.<br>Players pass through each other for smooth, casual racing.</p><div class="actions">${button("Back", "home")}</div>`;
+    content = `<div class="eyebrow">KEI TRUCK CLUB / UP TO ${MAX_PLAYERS} DRIVERS</div><h2>Bring your crew.</h2><p class="subtitle">Create a room, share the link, and race from the temple to the tower together.</p><label class="field">Your name<input id="driver-name" maxlength="18" value="${escapeHTML(preferredName)}" autocomplete="nickname"></label><div class="actions">${button("Create a lobby →", "create-room", true)}</div><div class="join-row"><input id="room-code" maxlength="7" placeholder="ROOM CODE" aria-label="Room code" value="${inviteCode}">${button("Join room", "join-room")}</div><p class="online-error" role="status">${escapeHTML(onlineError)}</p><p class="help">Choose your truck and paint in the Garage first.<br>Host stays online. The race continues while paused.<br>Players pass through each other for smooth, casual racing.</p><div class="actions">${button("Back", "home")}</div>`;
   if (screen === "lobby") {
     const connected = lobby?.phase === "lobby";
     const roster = lobby?.roster || [];
     const ready = roster.length >= 2 && roster.every((p) => p.ready);
     const me = lobby?.players[lobby.id];
-    content = `<div class="eyebrow">PRIVATE LOBBY / ${roster.length} OF ${MAX_PLAYERS}</div><h2>${connected ? "Your crew is gathering." : onlineStatus}</h2>${connected ? `<div class="room-code">${lobby.code}</div><p class="help">Share this room code or send your friends an invite.</p><div class="row">${button("Copy invite link", "copy-invite")}${button("Copy code", "copy-code")}</div><div class="lobby-roster">${roster.map((p) => `<div class="lobby-player"><i style="background:${p.paint}"></i><span>${escapeHTML(p.name)}${p.id === lobby.id ? " (you)" : ""}<small>${trucks[p.vehicle].name}</small></span><b>${p.id === Object.keys(lobby.players)[0] ? "HOST" : p.ready ? "READY" : "WAITING"}</b></div>`).join("")}</div><div class="actions">${lobby.host ? `<button class="primary" data-action="start-online" ${ready ? "" : "disabled"}>Start race →</button>` : button(me?.ready ? "Not ready" : "Ready to race →", "ready", !me?.ready)}</div><p class="help">${lobby.host ? "At least two drivers must be ready to start." : "The host starts when everyone is ready."}</p>` : ""}<div class="actions">${button("Leave lobby", "leave-room")}</div>`;
+    content = `<div class="eyebrow">PRIVATE LOBBY / ${roster.length} OF ${MAX_PLAYERS}</div><h2>${connected ? "Your crew is gathering." : onlineStatus}</h2>${connected ? `<div class="room-code">${lobby.code}</div><p class="help">Share this room code or send your friends an invite.</p><div class="row">${button("Copy invite link", "copy-invite")}${button("Copy code", "copy-code")}</div><div class="lobby-name-row"><label for="lobby-name">Your driver name</label><div class="join-row"><input id="lobby-name" maxlength="18" value="${escapeHTML(me?.name || preferredName)}" aria-label="Your lobby name">${button("Save name", "save-name")}</div></div><div class="lobby-roster">${roster.map((p) => `<div class="lobby-player"><i style="background:${p.paint}"></i><span>${escapeHTML(p.name)}${p.id === lobby.id ? " (you)" : ""}<small>${trucks[p.vehicle].name}</small></span><b>${p.id === Object.keys(lobby.players)[0] ? "HOST" : p.ready ? "READY" : "WAITING"}</b></div>`).join("")}</div><div class="actions">${lobby.host ? `<button class="primary" data-action="start-online" ${ready ? "" : "disabled"}>Start race →</button>` : button(me?.ready ? "Not ready" : "Ready to race →", "ready", !me?.ready)}</div><p class="help">${lobby.host ? "At least two drivers must be ready to start." : "The host starts when everyone is ready."}</p>` : ""}<div class="actions">${button("Leave lobby", "leave-room")}</div>`;
   }
   if (screen === "settings")
     content = `<div class="eyebrow">MAKE YOURSELF AT HOME</div><h2>City settings</h2><label>Time of day <select id="lighting">${["Afternoon", "Sunset", "Night"].map((x) => `<option ${x === lighting ? "selected" : ""}>${x}</option>`).join("")}</select></label><label>Volume <input id="volume" type="range" min="0" max="1" step=".01" value="${sound.volume}"></label><label>Mute <input id="mute" type="checkbox" ${sound.muted ? "checked" : ""}></label><p class="help">W / ↑ Accelerate · S / ↓ Brake & reverse<br>A D / ← → Steer · Space Handbrake<br>C Camera · R Reset · M Minimap · Esc Pause<br>Controller: RT accelerate · LT brake · Left stick steer<br>A handbrake · Y camera · Start pause</p><div class="actions">${button("Back", "back", true)}</div>`;
@@ -309,6 +354,20 @@ function renderUI() {
   if (screen === "results" && lobby?.active)
     content = `<div class="eyebrow">FRIENDS / TOKYO RUN</div><h2>Across the line.</h2><div class="results-time">${format(elapsed)}</div><aside class="results-standings"><div id="standings"></div></aside><p class="help">Results update as the rest of the crew finishes.</p><div class="actions">${lobby.host ? button("Return everyone to lobby", "return-lobby", true) : '<p class="help">Wait for the host to return to the lobby.</p>'}${button("Leave room", "leave-room")}</div>`;
   app.innerHTML = `<section class="overlay"><header class="brand"><span class="mark">東</span> TOKYO RUN <span style="color:#829b8a">/</span> KEI TRUCK CLUB</header><div class="edition">VOL. 01 &nbsp; — &nbsp; THE TOKYO EDITION</div><div class="menu-content">${content}</div><footer class="bottom"><div>HANDCRAFTED STREETS. UNHURRIED ADVENTURES.<br><b>浅草 → スカイツリー &nbsp; / &nbsp; ${lighting.toUpperCase()} SESSION</b></div><div class="stamp">JAPANESE SOUL.<br>660cc OF FREEDOM.</div></footer></section>`;
+  if (nameDraft) {
+    const field = app.querySelector("#lobby-name");
+    if (field) {
+      field.value = nameDraft.value;
+      field.focus();
+      field.setSelectionRange(nameDraft.caret, nameDraft.caret);
+    }
+  }
+  app.querySelector("#lobby-name")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      action("save-name");
+    }
+  });
   updateStandings();
   app
     .querySelectorAll("[data-action]")
@@ -333,6 +392,12 @@ function renderUI() {
 }
 let returnScreen = "home";
 function action(a) {
+  if (a === "save-name") {
+    const value = cleanName(document.querySelector("#lobby-name")?.value);
+    rememberName(value);
+    lobby?.rename(value);
+    return;
+  }
   if (a === "create-room" || a === "join-room") {
     sound.start();
     connectLobby(a === "create-room");
@@ -558,7 +623,8 @@ function frame(now) {
     } else {
       document.querySelector(".countdown").textContent = "";
       if (!lobby?.active) elapsed += dt;
-      const spec = trucks[selected];
+      const clock = chaosTime();
+      let spec = chaos.effects.specification(trucks[selected], clock);
       const state = {
         x: position.x,
         z: position.z,
@@ -568,6 +634,8 @@ function frame(now) {
         vx: velocity.x,
         vz: velocity.y,
       };
+      chaos.apply(state, clock, hazardFeedback);
+      spec = chaos.effects.specification(trucks[selected], clock);
       let hit = false;
       for (let step = 0; step < dt; step += 1 / 120)
         hit =
@@ -576,7 +644,7 @@ function frame(now) {
             input,
             Math.min(1 / 120, dt - step),
             spec,
-            world.boxes,
+            collisionBoxes,
           ) || hit;
       ({ speed, yaw, steer } = state);
       position.set(state.x, 0, state.z);
@@ -617,6 +685,8 @@ function frame(now) {
       }
     }
     truck.position.copy(position);
+    const bump = Math.max(0, chaos.effects.bumpUntil - chaosTime());
+    truck.position.y = Math.sin(time * 28) * bump * 0.3;
     truck.rotation.set(
       Math.sin(time * 8) * Math.abs(speed) * 0.0005,
       yaw,
@@ -654,6 +724,10 @@ function frame(now) {
     )
       .applyAxisAngle(new T.Vector3(0, 1, 0), yaw)
       .add(position);
+    if (bump > 0) {
+      camera.position.x += Math.sin(time * 53) * bump * 0.12;
+      camera.position.y += Math.sin(time * 67) * bump * 0.1;
+    }
     camera.lookAt(target);
     truck.visible = true;
     const speedEl = document.querySelector("#speed");
@@ -693,6 +767,43 @@ function frame(now) {
     camera.position.set(5, 2.6, 12);
     camera.lookAt(-5, 1, 7);
   }
+  const chaosClock = chaosTime();
+  if (lobby?.race) chaos.setEvent(lobby.race.chaos || null);
+  else if (
+    active &&
+    monsterSlot(chaosClock) >= 0 &&
+    monsterSlot(chaosClock) > (chaos.event?.id ?? -1)
+  )
+    chaos.setEvent(
+      makeMonsterEvent(monsterSlot(chaosClock), chaosClock, {
+        x: position.x,
+        z: position.z,
+        cp,
+      }),
+    );
+  chaos.update(chaosClock, ["drive", "pause", "results"].includes(screen));
+  if (chaos.event && chaos.event.id !== monsterNotice) {
+    monsterNotice = chaos.event.id;
+    if (active) {
+      toast("GODZILLA ALERT! Avoid the marked impact zones");
+      sound.beep(65, 0.45);
+    }
+  }
+  const chaosStatus = document.querySelector("#chaos-status");
+  if (chaosStatus) {
+    const age = chaos.event ? chaosClock - chaos.event.startAt : -1;
+    chaosStatus.textContent =
+      age >= 0 && age < 3
+        ? "GODZILLA INCOMING · WATCH THE AMBER RINGS"
+        : chaosClock < chaos.effects.boostUntil
+          ? "BOOST ACTIVE"
+          : chaosClock < chaos.effects.oilUntil
+            ? "OIL SLICK · LOW GRIP"
+            : age >= 3 && age < 14
+              ? "GODZILLA ATTACK · DODGE THE RUBBLE"
+              : "";
+    chaosStatus.classList.toggle("danger", age >= 0 && age < 14);
+  }
   checkpoint.visible = mode === "race" && active && cp < checkpoints.length;
   if (checkpoint.visible) {
     const p = checkpoints[cp],
@@ -709,7 +820,13 @@ function frame(now) {
     p.rotation.y =
       Math.cos(time * 0.4 + p.userData.phase) > 0 ? Math.PI / 2 : -Math.PI / 2;
   }
-  sound.update(speed, input.throttle, active, input.hand, input.brake);
+  sound.update(
+    speed,
+    input.throttle,
+    active,
+    input.hand || chaosTime() < chaos.effects.oilUntil,
+    input.brake,
+  );
   if (toastTime > 0 && (toastTime -= dt) <= 0)
     document.querySelector(".toast")?.remove();
   if (lobby?.phase === "race") {
@@ -749,6 +866,14 @@ if (new URLSearchParams(location.search).has("qa"))
       selected,
       paint,
       countdown,
+      chaos: {
+        hazards: chaos.hazards,
+        boostUntil: chaos.effects.boostUntil,
+        oilUntil: chaos.effects.oilUntil,
+        lastHit: chaos.effects.lastHit,
+        event: chaos.event,
+        clock: chaosTime(),
+      },
       online: lobby
         ? {
             phase: lobby.phase,
@@ -770,6 +895,33 @@ if (new URLSearchParams(location.search).has("qa"))
     skipCountdown: () => {
       countdown = 0;
       if (lobby?.race) raceStartAt = lobby.now;
+    },
+    advanceChaos: (seconds) => {
+      if (!lobby?.active) elapsed += seconds;
+    },
+    monster: () => {
+      if (lobby?.host) lobby.triggerMonster(true);
+      else
+        chaos.setEvent(
+          makeMonsterEvent(0, chaosTime(), {
+            x: position.x,
+            z: position.z,
+            cp,
+          }),
+        );
+    },
+    hazard: (type) => {
+      const h = chaos.hazards.find((h) => h.type === type);
+      chaos.effects.reset();
+      const behind = type === "roadblock" ? 7 : 0;
+      position.set(
+        h.x - Math.sin(h.angle) * behind,
+        0,
+        h.z - Math.cos(h.angle) * behind,
+      );
+      yaw = Math.atan2(-Math.sin(h.angle), -Math.cos(h.angle));
+      speed = 15;
+      velocity.set(-Math.sin(yaw) * speed, -Math.cos(yaw) * speed);
     },
     renderFrame: () => renderer.render(scene, camera),
     route,
