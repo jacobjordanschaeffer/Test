@@ -1,4 +1,6 @@
 import { chromium } from "playwright";
+import fs from "node:fs";
+let stage = "loading";
 import assert from "node:assert/strict";
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
@@ -38,6 +40,7 @@ try {
   await host.locator("[data-action=create-room]").click();
   await host.waitForFunction(() => gameQA.getState().online?.phase === "lobby");
   const code = (await state(host)).online.code;
+  stage = "guest join";
   console.log("Created room", code);
   await guest.locator("[data-action=online]").click();
   await guest.locator("#driver-name").fill("Friend");
@@ -49,6 +52,7 @@ try {
   await host.waitForFunction(
     () => gameQA.getState().online?.players.length === 2,
   );
+  stage = "idle survival";
   await guest.waitForTimeout(21000);
   assert.equal((await state(guest)).online.phase, "lobby");
   assert.equal((await state(host)).online.players.length, 2);
@@ -57,6 +61,7 @@ try {
     await host.locator("[data-action=start-online]").isDisabled(),
     true,
   );
+  stage = "rename";
   await guest.locator("#lobby-name").fill("New Friend");
   await guest.locator("[data-action=save-name]").click();
   await host.waitForFunction(() =>
@@ -101,11 +106,13 @@ try {
   assert.equal((await state(guest)).online.remotes, 1);
   await guest.evaluate(() => gameQA.renderFrame());
   console.log("Remote truck movement synchronized and rendered");
+  stage = "signaling disconnect";
   await host.evaluate(() => gameQA.disconnectSignaling());
   await host.waitForFunction(
     () => gameQA.getState().online.signalConnected === false,
   );
   assert.equal((await state(guest)).online.phase, "race");
+  stage = "signaling reconnect";
   await host.waitForFunction(
     () => gameQA.getState().online.signalConnected === true,
   );
@@ -127,6 +134,7 @@ try {
   );
   console.log("Hazard layout and monster attacks synchronize across browsers");
 
+  stage = "pause and finish";
   await host.keyboard.press("Escape");
   const before = (await state(host)).elapsed;
   await host.waitForTimeout(1000);
@@ -181,6 +189,35 @@ try {
   assert.deepEqual(errors, []);
   console.log("Multiplayer browser checks passed with no JS errors.");
 } catch (error) {
+  const summary = {
+    stage,
+    error: error.stack,
+    browserErrors: errors,
+    clients: [],
+  };
+  for (const p of pages)
+    if (!p.isClosed()) {
+      const s = await state(p);
+      summary.clients.push({
+        screen: s.screen,
+        cp: s.cp,
+        elapsed: s.elapsed,
+        online: s.online,
+        errorText: await p.evaluate(
+          () => document.querySelector(".online-error")?.textContent ?? null,
+        ),
+      });
+    }
+  if (process.env.GITHUB_STEP_SUMMARY)
+    fs.appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      "## Multiplayer regression diagnostics\n\n<pre>" +
+        JSON.stringify(summary, null, 2).replace(
+          /[<>&]/g,
+          (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c],
+        ) +
+        "</pre>\n",
+    );
   for (const p of pages) {
     if (!p.isClosed()) console.log("Failure state:", await state(p));
   }
