@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node tests/physics.test.js && node tests/multiplayer-unit.mjs && node tests/chaos-unit.mjs",
+    "test": "node tests/physics.test.js && node tests/multiplayer-unit.mjs && node tests/chaos-unit.mjs && node tests/graphics.test.mjs",
     "test:browser": "node tests/browser.mjs",
     "test:multiplayer": "node tests/multiplayer.mjs",
     "signal:test": "peerjs --port 9000 --path /peerjs",

@@ -167,3 +167,118 @@ test("lobby renaming and host-controlled monster schedule preserve shared race s
     connection.close();
   }
 });
+
+test("healthy guest connection survives the 18-second handshake deadline", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const room = new Lobby();
+  room.isHost = false;
+  room.id = "guest";
+  room.localProfile = profile({ name: "Friend" });
+  room.phase = "connecting";
+  const c = new Connection("host");
+  try {
+    room.attach(c);
+    c.emit("open");
+    c.emit("data", {
+      type: "room",
+      phase: "lobby",
+      race: null,
+      players: [
+        { id: "host", name: "Host", ready: true },
+        { id: "guest", name: "Friend", ready: false },
+      ],
+    });
+    t.mock.timers.tick(18001);
+    assert.equal(c.open, true);
+    assert.equal(room.phase, "lobby");
+    assert.equal(room.closed, false);
+  } finally {
+    room.close();
+  }
+});
+
+test("congested channels drop redundant movement but retain checkpoint transitions", () => {
+  const room = new Lobby();
+  room.isHost = false;
+  room.id = "guest";
+  room.phase = "race";
+  room.race = { id: "race" };
+  room.players.guest = { id: "guest" };
+  room.lastSync = Date.now();
+  const c = new Connection("host");
+  c.bufferSize = 10;
+  room.connections.set(c.peer, c);
+  try {
+    const s = {
+      x: 1.123456,
+      z: 7.123456,
+      yaw: 0.123456,
+      speed: 20.123456,
+      cp: 0,
+    };
+    room.update(s);
+    assert.equal(c.messages.length, 1);
+    assert.equal(c.messages[0].state.x, 1.12);
+    room.update({ ...s, x: 2 });
+    room.tick();
+    assert.equal(c.messages.length, 1);
+    room.update({ ...s, cp: 1 });
+    assert.equal(c.messages.length, 2);
+    c.bufferSize = 0;
+    room.tick();
+    assert.equal(c.messages.length, 3);
+  } finally {
+    room.close();
+  }
+});
+test("idle lobby heartbeats are reduced while roster edits remain immediate", () => {
+  const room = new Lobby();
+  room.isHost = true;
+  room.id = "host";
+  room.phase = "lobby";
+  room.players = {
+    host: { id: "host", ready: true },
+    guest: { id: "guest", ready: false },
+  };
+  const c = new Connection("guest");
+  room.connections.set(c.peer, c);
+  try {
+    room.lastBroadcast = Date.now();
+    room.tick();
+    assert.equal(c.messages.length, 0);
+    room.lastBroadcast = Date.now() - 1001;
+    room.tick();
+    assert.equal(c.messages.length, 1);
+    room.rename("Captain");
+    assert.equal(c.messages.length, 2);
+  } finally {
+    room.close();
+  }
+});
+test("temporary signaling loss retries without closing existing racers", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const room = new Lobby();
+  room.isHost = true;
+  room.phase = "race";
+  let attempts = 0;
+  room.peer = {
+    disconnected: true,
+    reconnect() {
+      attempts++;
+      this.disconnected = false;
+    },
+    destroy() {},
+  };
+  const c = new Connection("guest");
+  room.connections.set(c.peer, c);
+  try {
+    room.reconnectSignaling();
+    t.mock.timers.tick(1000);
+    assert.equal(attempts, 1);
+    assert.equal(c.open, true);
+    assert.equal(room.phase, "race");
+    assert.equal(room.closed, false);
+  } finally {
+    room.close();
+  }
+});

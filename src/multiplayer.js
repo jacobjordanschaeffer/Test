@@ -28,6 +28,21 @@ export function validState(s) {
     s.cp <= 21
   );
 }
+export function compactState(s) {
+  return {
+    x: Math.round(s.x * 100) / 100,
+    z: Math.round(s.z * 100) / 100,
+    yaw: Math.round(s.yaw * 1000) / 1000,
+    speed: Math.round(s.speed * 100) / 100,
+    cp: s.cp,
+    brake: !!s.brake,
+  };
+}
+export function stateBackedUp(c) {
+  return (
+    (c.bufferSize || 0) > 2 || (c.dataChannel?.bufferedAmount || 0) > 65536
+  );
+}
 export function profile(p = {}) {
   if (!p || typeof p !== "object") p = {};
   return {
@@ -96,6 +111,14 @@ export class Lobby {
     );
     this.peer.on("open", (peerId) => {
       if (this.closed) return;
+      if (this.id) {
+        this.statusMessage = "";
+        this.reconnectAttempts = 0;
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+        this.onChange();
+        return;
+      }
       this.id = peerId;
       if (this.isHost) {
         this.players[this.id] = {
@@ -122,23 +145,54 @@ export class Lobby {
       }
       this.attach(c);
     });
-    this.peer.on("error", (e) =>
+    this.peer.on("error", (e) => {
+      if (
+        this.id &&
+        ["network", "server-error", "socket-error", "socket-closed"].includes(
+          e.type,
+        )
+      ) {
+        this.reconnectSignaling();
+        return;
+      }
+      if (this.isHost && e.type === "webrtc") {
+        this.statusMessage =
+          "A driver couldn't connect. Other racers can continue.";
+        this.onChange();
+        return;
+      }
       this.fail(
         e.type === "unavailable-id"
           ? "Room code is in use. Create another lobby."
           : e.type === "peer-unavailable"
             ? "Room not found. Refresh both browsers, check the code, and make sure the host is online."
             : "Multiplayer connection failed. Try another network or create a new lobby.",
-      ),
-    );
-    this.peer.on("disconnected", () => {
-      if (!this.closed)
-        this.fail(
-          "The connection service disconnected. Create or join a new lobby.",
-        );
+      );
     });
+    this.peer.on("disconnected", () => this.reconnectSignaling());
     this.timer = setInterval(() => this.tick(), 100);
     this.onChange();
+  }
+  reconnectSignaling() {
+    if (this.closed || this.reconnectTimer) return;
+    this.statusMessage =
+      "Reconnecting the lobby service… Existing racers stay connected.";
+    this.onChange();
+    const attempt = this.reconnectAttempts || 0;
+    this.reconnectTimer = setTimeout(
+      () => {
+        this.reconnectTimer = null;
+        if (this.closed || this.peer?.destroyed) return;
+        if (this.peer?.disconnected) {
+          try {
+            this.peer.reconnect();
+          } catch {}
+          this.reconnectAttempts = attempt + 1;
+          this.reconnectSignaling();
+        }
+      },
+      Math.min(15000, 1000 * 2 ** Math.min(attempt, 4)),
+    );
   }
   attach(c) {
     let accepted = false;
@@ -164,6 +218,9 @@ export class Lobby {
         }
         this.connections.set(c.peer, c);
       } else {
+        // This timer guards opening the data channel, not the life of the race.
+        accepted = true;
+        clearTimeout(timer);
         this.connections.set(c.peer, c);
         c.send({ type: "hello", profile: this.localProfile });
         this.sync();
@@ -223,7 +280,7 @@ export class Lobby {
               ? message.state.cp === 0
               : message.state.cp >= old.cp && message.state.cp <= old.cp + 1
           ) {
-            player.state = { ...message.state, cp: message.state.cp };
+            player.state = compactState(message.state);
             if (player.state.cp === 21 && !player.finish)
               player.finish = Math.max(
                 0,
@@ -378,7 +435,13 @@ export class Lobby {
   }
   update(state) {
     if (this.phase !== "race" || !validState(state)) return;
+    const progressChanged = !this.localState || this.localState.cp !== state.cp;
+    state = compactState(state);
     this.localState = state;
+    // Progress is reliable; only redundant movement snapshots may be dropped.
+    if (!this.isHost && progressChanged)
+      for (const c of this.connections.values())
+        if (c.open) c.send({ type: "state", race: this.race.id, state });
     const p = this.players[this.id];
     if (p) {
       p.state = state;
@@ -390,10 +453,14 @@ export class Lobby {
     if (this.closed) return;
     if (this.isHost) {
       this.triggerMonster();
-      this.broadcast();
+      if (
+        this.phase === "race" ||
+        Date.now() - (this.lastBroadcast || 0) >= 1000
+      )
+        this.broadcast();
     } else if (this.phase === "race" && this.localState)
       for (const c of this.connections.values())
-        if (c.open)
+        if (c.open && !stateBackedUp(c))
           c.send({ type: "state", race: this.race.id, state: this.localState });
     if (!this.lastSync || Date.now() - this.lastSync > 5000) {
       this.lastSync = Date.now();
@@ -401,6 +468,7 @@ export class Lobby {
     }
   }
   broadcast() {
+    this.lastBroadcast = Date.now();
     const room = {
       type: "room",
       players: this.roster,
@@ -408,7 +476,7 @@ export class Lobby {
       race: this.race,
     };
     for (const c of this.connections.values())
-      if (c.open && this.players[c.peer]) c.send(room);
+      if (c.open && this.players[c.peer] && !stateBackedUp(c)) c.send(room);
   }
   fail(message) {
     if (this.closed) return;
@@ -419,6 +487,7 @@ export class Lobby {
     this.closed = true;
     clearInterval(this.timer);
     clearTimeout(this.timeout);
+    clearTimeout(this.reconnectTimer);
     for (const c of this.connections.values()) c.close();
     this.connections.clear();
     this.peer?.destroy();

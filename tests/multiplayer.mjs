@@ -49,6 +49,10 @@ try {
   await host.waitForFunction(
     () => gameQA.getState().online?.players.length === 2,
   );
+  await guest.waitForTimeout(21000);
+  assert.equal((await state(guest)).online.phase, "lobby");
+  assert.equal((await state(host)).online.players.length, 2);
+  console.log("Healthy guests stay connected beyond the old 18-second timeout");
   assert.equal(
     await host.locator("[data-action=start-online]").isDisabled(),
     true,
@@ -97,6 +101,20 @@ try {
   assert.equal((await state(guest)).online.remotes, 1);
   await guest.evaluate(() => gameQA.renderFrame());
   console.log("Remote truck movement synchronized and rendered");
+  await host.evaluate(() => gameQA.disconnectSignaling());
+  await host.waitForFunction(
+    () => gameQA.getState().online.signalConnected === false,
+  );
+  assert.equal((await state(guest)).online.phase, "race");
+  await host.waitForFunction(
+    () => gameQA.getState().online.signalConnected === true,
+  );
+  assert.equal((await state(host)).screen, "drive");
+  assert.equal((await state(guest)).online.phase, "race");
+  console.log(
+    "Signaling reconnect preserves the running race and guest connection",
+  );
+
   assert.deepEqual(
     (await state(host)).chaos.hazards,
     (await state(guest)).chaos.hazards,

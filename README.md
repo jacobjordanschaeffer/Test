@@ -88,3 +88,13 @@ Every district now has interactive arcade hazards:
 Chaos is enabled in both solo modes and friend races. Multiplayer uses a shared course seed and host-broadcast monster event positions/timestamps. The host targets the leading checkpoint area, and every browser sees the same attack; vehicle impacts are simulated locally as part of casual racing. Boosts, oil, and impacts expire; warnings give drivers a chance to dodge, and roadblocks leave a passing lane.
 
 `npm test` includes deterministic hazard generation, effect duration/cooldown, host scheduling, name editing, and network message checks. With Vite running, `npm run test:chaos` exercises actual truck boost speed, pothole/oil effects, roadblock collision, monster warnings, and rubble rendering/impact. The hosted multiplayer suite also checks name changes and identical hazard/event data across independent browsers before deployment.
+
+## Connection stability and graphics
+
+The guest handshake timeout is cleared as soon as the data channel opens; a connected racer no longer gets disconnected by that eighteen-second timer. Temporary signaling-service loss triggers a reconnect while established driver connections remain active. Actual host departure or a failed direct data connection still ends that connection; this does not add a TURN relay or solve every restrictive-network problem.
+
+Idle lobbies send a heartbeat once per second instead of ten times per second. Movement coordinates are rounded for smaller packets; redundant snapshots are skipped when the outgoing channel is backed up, while checkpoint transitions are sent reliably. The standings DOM updates only when its displayed values or order change.
+
+In **Settings → Graphics**, choose **Performance** for lower resolution and no shadows, **High** for visual quality, or **Auto** (default) to lower rendering cost when frame rates are poor. The choice is remembered in your browser. Hosts should keep the game tab active while racing.
+
+Regression checks include a guest staying in the lobby for more than twenty seconds, reconnecting the host's signaling service during a race, queue backpressure without lost checkpoint transitions, and saved performance settings.

@@ -568,3 +568,16 @@ button:disabled {
 .overlay:has(.lobby-name-row) .bottom {
   margin-top: 20px;
 }
+.standings-panel {
+  max-width: 300px;
+}
+#network-status {
+  display: block;
+  line-height: 1.5;
+  color: #e6c88c;
+  margin-top: 8px;
+}
+.overlay:has(#graphics) {
+  overflow-y: auto;
+  gap: 20px;
+}

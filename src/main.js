@@ -1,4 +1,7 @@
 import * as T from "three";
+import { GraphicsQuality } from "./graphics.js";
+const queryParams = new URLSearchParams(location.search);
+const simulationOnly = queryParams.has("qa") && queryParams.has("simulation");
 import "@fontsource/barlow-condensed/latin-800.css";
 import "@fontsource/barlow-condensed/latin-600.css";
 import "@fontsource/inter/latin-400.css";
@@ -25,10 +28,15 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = T.PCFSoftShadowMap;
 renderer.toneMapping = T.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
-if (new URLSearchParams(location.search).has("low")) {
-  renderer.setPixelRatio(0.5);
-  renderer.shadowMap.enabled = false;
-}
+let graphicsMode = "auto";
+try {
+  graphicsMode = localStorage.getItem("tokyo-run-graphics") || "auto";
+} catch {}
+const graphics = new GraphicsQuality(renderer, {
+  ratio: devicePixelRatio,
+  mode: graphicsMode,
+  low: queryParams.has("low"),
+});
 const scene = new T.Scene();
 scene.background = new T.Color("#a4bcb1");
 scene.fog = new T.FogExp2("#a4bcb1", 0.003);
@@ -239,8 +247,14 @@ function ranking() {
 function updateStandings() {
   const list = document.querySelector("#standings");
   if (!list || !lobby?.active) return;
+  const ordered = ranking();
+  const key = JSON.stringify(
+    ordered.map((p) => [p.id, p.name, p.state?.cp, p.finish]),
+  );
+  if (list.dataset.roster === key) return;
+  list.dataset.roster = key;
   list.replaceChildren(
-    ...ranking().map((p, i) => {
+    ...ordered.map((p, i) => {
       const row = document.createElement("div");
       row.className = "standing" + (p.id === lobby.id ? " me" : "");
       const name = document.createElement("span");
@@ -317,7 +331,7 @@ function renderUI() {
         }
       : null;
   if (screen === "drive" && !paused) {
-    app.innerHTML = `<div class="hud"><div class="hud-top"><div class="location"><span id="mode-label">${mode === "race" ? "TOKYO RUN / CHECKPOINT 01" : "FREE ROAM / NO WRONG TURNS"}</span><strong id="district">Temple District</strong></div><div class="timer"><small>${mode === "race" ? "ELAPSED TIME" : "THE CITY IS YOURS"}</small><span id="timer">${mode === "race" ? "00:00.00" : "東京散歩"}</span></div></div><canvas class="map ${minimap ? "" : "hidden"}" width="380" height="450"></canvas><div class="camera-label">C · <span id="camera-name">${cameraNames[cameraMode]}</span></div><div class="speed"><div class="gear" id="gear">N</div><b id="speed">0</b> <span>KM/H</span></div><div class="hint">WASD DRIVE &nbsp; SPACE HANDBRAKE &nbsp; R RESET &nbsp; ESC PAUSE</div><div class="countdown"></div><div class="chaos-status" id="chaos-status"></div>${lobby?.active ? '<aside class="standings-panel"><div class="eyebrow">FRIENDS / LIVE STANDINGS</div><div id="standings"></div></aside>' : ""}</div>`;
+    app.innerHTML = `<div class="hud"><div class="hud-top"><div class="location"><span id="mode-label">${mode === "race" ? "TOKYO RUN / CHECKPOINT 01" : "FREE ROAM / NO WRONG TURNS"}</span><strong id="district">Temple District</strong></div><div class="timer"><small>${mode === "race" ? "ELAPSED TIME" : "THE CITY IS YOURS"}</small><span id="timer">${mode === "race" ? "00:00.00" : "東京散歩"}</span></div></div><canvas class="map ${minimap ? "" : "hidden"}" width="380" height="450"></canvas><div class="camera-label">C · <span id="camera-name">${cameraNames[cameraMode]}</span></div><div class="speed"><div class="gear" id="gear">N</div><b id="speed">0</b> <span>KM/H</span></div><div class="hint">WASD DRIVE &nbsp; SPACE HANDBRAKE &nbsp; R RESET &nbsp; ESC PAUSE</div><div class="countdown"></div><div class="chaos-status" id="chaos-status"></div>${lobby?.active ? '<aside class="standings-panel"><div class="eyebrow">FRIENDS / LIVE STANDINGS</div><div id="standings"></div><small id="network-status" role="status"></small></aside>' : ""}</div>`;
     return;
   }
   let content = "";
@@ -346,13 +360,13 @@ function renderUI() {
     content = `<div class="eyebrow">PRIVATE LOBBY / ${roster.length} OF ${MAX_PLAYERS}</div><h2>${connected ? "Your crew is gathering." : onlineStatus}</h2>${connected ? `<div class="room-code">${lobby.code}</div><p class="help">Share this room code or send your friends an invite.</p><div class="row">${button("Copy invite link", "copy-invite")}${button("Copy code", "copy-code")}</div><div class="lobby-name-row"><label for="lobby-name">Your driver name</label><div class="join-row"><input id="lobby-name" maxlength="18" value="${escapeHTML(me?.name || preferredName)}" aria-label="Your lobby name">${button("Save name", "save-name")}</div></div><div class="lobby-roster">${roster.map((p) => `<div class="lobby-player"><i style="background:${p.paint}"></i><span>${escapeHTML(p.name)}${p.id === lobby.id ? " (you)" : ""}<small>${trucks[p.vehicle].name}</small></span><b>${p.id === Object.keys(lobby.players)[0] ? "HOST" : p.ready ? "READY" : "WAITING"}</b></div>`).join("")}</div><div class="actions">${lobby.host ? `<button class="primary" data-action="start-online" ${ready ? "" : "disabled"}>Start race →</button>` : button(me?.ready ? "Not ready" : "Ready to race →", "ready", !me?.ready)}</div><p class="help">${lobby.host ? "At least two drivers must be ready to start." : "The host starts when everyone is ready."}</p>` : ""}<div class="actions">${button("Leave lobby", "leave-room")}</div>`;
   }
   if (screen === "settings")
-    content = `<div class="eyebrow">MAKE YOURSELF AT HOME</div><h2>City settings</h2><label>Time of day <select id="lighting">${["Afternoon", "Sunset", "Night"].map((x) => `<option ${x === lighting ? "selected" : ""}>${x}</option>`).join("")}</select></label><label>Volume <input id="volume" type="range" min="0" max="1" step=".01" value="${sound.volume}"></label><label>Mute <input id="mute" type="checkbox" ${sound.muted ? "checked" : ""}></label><p class="help">W / ↑ Accelerate · S / ↓ Brake & reverse<br>A D / ← → Steer · Space Handbrake<br>C Camera · R Reset · M Minimap · Esc Pause<br>Controller: RT accelerate · LT brake · Left stick steer<br>A handbrake · Y camera · Start pause</p><div class="actions">${button("Back", "back", true)}</div>`;
+    content = `<div class="eyebrow">MAKE YOURSELF AT HOME</div><h2>City settings</h2><label>Graphics <select id="graphics">${["auto", "performance", "high"].map((m) => `<option value="${m}" ${m === graphics.mode ? "selected" : ""}>${m === "auto" ? "Auto (adapts to your device)" : m === "performance" ? "Performance" : "High"}</option>`).join("")}</select></label><label>Time of day <select id="lighting">${["Afternoon", "Sunset", "Night"].map((x) => `<option ${x === lighting ? "selected" : ""}>${x}</option>`).join("")}</select></label><label>Volume <input id="volume" type="range" min="0" max="1" step=".01" value="${sound.volume}"></label><label>Mute <input id="mute" type="checkbox" ${sound.muted ? "checked" : ""}></label><p class="help">W / ↑ Accelerate · S / ↓ Brake & reverse<br>A D / ← → Steer · Space Handbrake<br>C Camera · R Reset · M Minimap · Esc Pause<br>Controller: RT accelerate · LT brake · Left stick steer<br>A handbrake · Y camera · Start pause</p><div class="actions">${button("Back", "back", true)}</div>`;
   if (screen === "pause")
     content = `<div class="eyebrow">TAKE A BREATHER</div><h2>Parked for a moment.</h2><div class="actions">${button("Resume →", "resume", true)}${lobby?.active ? "" : button("Restart", "restart")}${mode === "free" ? button("Change vehicle", "garage") : ""}${button("Settings", "settings")}${button(lobby?.active ? "Leave race" : "Main menu", "home")}</div>`;
   if (screen === "results")
     content = `<div class="eyebrow">TOKYO RUN / COMPLETE</div><h2>You took the scenic route.</h2><div class="results-time">${format(elapsed)}</div><p class="subtitle">Personal best: ${format(best || elapsed)}<br>Temple District → Skytree District</p><div class="actions">${button("One more run ↗", "race", true)}${button("Explore the city", "free")}${button(lobby?.active ? "Leave race" : "Main menu", "home")}</div>`;
   if (screen === "results" && lobby?.active)
-    content = `<div class="eyebrow">FRIENDS / TOKYO RUN</div><h2>Across the line.</h2><div class="results-time">${format(elapsed)}</div><aside class="results-standings"><div id="standings"></div></aside><p class="help">Results update as the rest of the crew finishes.</p><div class="actions">${lobby.host ? button("Return everyone to lobby", "return-lobby", true) : '<p class="help">Wait for the host to return to the lobby.</p>'}${button("Leave room", "leave-room")}</div>`;
+    content = `<div class="eyebrow">FRIENDS / TOKYO RUN</div><h2>Across the line.</h2><div class="results-time">${format(elapsed)}</div><aside class="results-standings"><div id="standings"></div><small id="network-status" role="status"></small></aside><p class="help">Results update as the rest of the crew finishes.</p><div class="actions">${lobby.host ? button("Return everyone to lobby", "return-lobby", true) : '<p class="help">Wait for the host to return to the lobby.</p>'}${button("Leave room", "leave-room")}</div>`;
   app.innerHTML = `<section class="overlay"><header class="brand"><span class="mark">東</span> TOKYO RUN <span style="color:#829b8a">/</span> KEI TRUCK CLUB</header><div class="edition">VOL. 01 &nbsp; — &nbsp; THE TOKYO EDITION</div><div class="menu-content">${content}</div><footer class="bottom"><div>HANDCRAFTED STREETS. UNHURRIED ADVENTURES.<br><b>浅草 → スカイツリー &nbsp; / &nbsp; ${lighting.toUpperCase()} SESSION</b></div><div class="stamp">JAPANESE SOUL.<br>660cc OF FREEDOM.</div></footer></section>`;
   if (nameDraft) {
     const field = app.querySelector("#lobby-name");
@@ -380,6 +394,12 @@ function renderUI() {
         renderUI();
       }),
   );
+  app.querySelector("#graphics")?.addEventListener("change", (e) => {
+    graphics.set(e.target.value);
+    try {
+      localStorage.setItem("tokyo-run-graphics", graphics.mode);
+    } catch {}
+  });
   app
     .querySelector("#lighting")
     ?.addEventListener("change", (e) => setLight(e.target.value));
@@ -603,7 +623,9 @@ let last = performance.now(),
   mapTick = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min((now - last) / 1000, 0.15);
+  const frameSeconds = (now - last) / 1000;
+  const dt = Math.min(frameSeconds, 0.15);
+  if (!simulationOnly && !document.hidden) graphics.observe(frameSeconds);
   last = now;
   time += dt;
   if (lobby?.phase === "race" && !multiplayerFinished) {
@@ -829,6 +851,8 @@ function frame(now) {
   );
   if (toastTime > 0 && (toastTime -= dt) <= 0)
     document.querySelector(".toast")?.remove();
+  const networkStatus = document.querySelector("#network-status");
+  if (networkStatus) networkStatus.textContent = lobby?.statusMessage || "";
   if (lobby?.phase === "race") {
     lobby.update({
       x: position.x,
@@ -841,11 +865,7 @@ function frame(now) {
     remotes.update(lobby.roster, lobby.id, dt, true);
     updateStandings();
   } else remotes.update([], null, dt, false);
-  if (!(
-    new URLSearchParams(location.search).has("qa") &&
-    new URLSearchParams(location.search).has("simulation")
-  ))
-    renderer.render(scene, camera);
+  if (!simulationOnly) renderer.render(scene, camera);
 }
 if (inviteCode) screen = "online";
 renderUI();
@@ -866,6 +886,11 @@ if (new URLSearchParams(location.search).has("qa"))
       selected,
       paint,
       countdown,
+      graphics: {
+        mode: graphics.mode,
+        scale: graphics.scale,
+        shadows: graphics.shadows,
+      },
       chaos: {
         hazards: chaos.hazards,
         boostUntil: chaos.effects.boostUntil,
@@ -877,6 +902,7 @@ if (new URLSearchParams(location.search).has("qa"))
       online: lobby
         ? {
             phase: lobby.phase,
+            signalConnected: !lobby.peer?.disconnected,
             code: lobby.code,
             players: lobby.roster,
             host: lobby.host,
@@ -896,6 +922,7 @@ if (new URLSearchParams(location.search).has("qa"))
       countdown = 0;
       if (lobby?.race) raceStartAt = lobby.now;
     },
+    disconnectSignaling: () => lobby?.peer?.disconnect(),
     advanceChaos: (seconds) => {
       if (!lobby?.active) elapsed += seconds;
     },

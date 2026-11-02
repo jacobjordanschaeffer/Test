@@ -9,8 +9,25 @@ page.setDefaultTimeout(45000);
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 try {
-  await page.goto("http://localhost:5173/?qa&low&simulation");
+  await page.goto("http://localhost:5173/?qa&simulation");
   await page.waitForFunction(() => window.gameQA);
+  await page.locator("[data-action=settings]").click();
+  await page.locator("#graphics").selectOption("performance");
+  assert.equal(
+    (await page.evaluate(() => gameQA.getState())).graphics.scale,
+    0.75,
+  );
+  assert.equal(
+    (await page.evaluate(() => gameQA.getState())).graphics.shadows,
+    false,
+  );
+  await page.reload();
+  await page.waitForFunction(() => window.gameQA);
+  assert.equal(
+    (await page.evaluate(() => gameQA.getState())).graphics.mode,
+    "performance",
+  );
+  console.log("Performance graphics settings apply and persist");
   await page.locator("[data-action=free]").click();
   await page.evaluate(() => gameQA.hazard("boost"));
   await page.waitForFunction(() => gameQA.getState().chaos.lastHit === "boost");
