@@ -189,6 +189,15 @@ try {
   assert.deepEqual(errors, []);
   console.log("Multiplayer browser checks passed with no JS errors.");
 } catch (error) {
+  console.error(
+    "::error title=Multiplayer " +
+      stage +
+      "::" +
+      String(error.stack)
+        .replace(/%/g, "%25")
+        .replace(/\r/g, "%0D")
+        .replace(/\n/g, "%0A"),
+  );
   const summary = {
     stage,
     error: error.stack,
