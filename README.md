@@ -91,7 +91,7 @@ Chaos is enabled in both solo modes and friend races. Multiplayer uses a shared 
 
 ## Connection stability and graphics
 
-The guest handshake timeout is cleared as soon as the data channel opens; a connected racer no longer gets disconnected by that eighteen-second timer. Temporary signaling-service loss triggers a reconnect while established driver connections remain active. Actual host departure or a failed direct data connection still ends that connection; this does not add a TURN relay or solve every restrictive-network problem.
+The guest handshake timeout is cleared as soon as the data channel opens; a connected racer no longer gets disconnected by that eighteen-second timer. Temporary signaling-service loss triggers a reconnect while established driver connections remain active. A heartbeat watchdog tolerates short interruptions and detects an unresponsive host after twenty seconds without traffic. Actual host departure or a failed direct data connection still ends that connection; this does not add a TURN relay or solve every restrictive-network problem.
 
 Idle lobbies send a heartbeat once per second instead of ten times per second. Movement coordinates are rounded for smaller packets; redundant snapshots are skipped when the outgoing channel is backed up, while checkpoint transitions are sent reliably. The standings DOM updates only when its displayed values or order change.
 

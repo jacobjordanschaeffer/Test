@@ -282,3 +282,22 @@ test("temporary signaling loss retries without closing existing racers", (t) => 
     room.close();
   }
 });
+
+test("heartbeat watchdog tolerates live traffic and detects a vanished host", () => {
+  const room = new Lobby();
+  room.isHost = false;
+  room.phase = "race";
+  room.id = "guest";
+  const c = new Connection("host");
+  room.connections.set(c.peer, c);
+  const now = Date.now();
+  room.lastSeen.set(c.peer, now);
+  room.checkPeerTimeouts(now + 19000);
+  assert.equal(room.closed, false);
+  room.lastSeen.set(c.peer, now + 19000);
+  room.checkPeerTimeouts(now + 30000);
+  assert.equal(room.closed, false);
+  room.checkPeerTimeouts(now + 40001);
+  assert.equal(room.closed, true);
+  assert.equal(c.open, false);
+});

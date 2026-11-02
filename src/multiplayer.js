@@ -65,6 +65,7 @@ export class Lobby {
     Object.assign(this, { onChange, onRace, onEnd, onError, options });
     this.players = {};
     this.connections = new Map();
+    this.lastSeen = new Map();
     this.phase = "offline";
     this.race = null;
     this.offset = 0;
@@ -217,11 +218,13 @@ export class Lobby {
           return;
         }
         this.connections.set(c.peer, c);
+        this.lastSeen.set(c.peer, Date.now());
       } else {
         // This timer guards opening the data channel, not the life of the race.
         accepted = true;
         clearTimeout(timer);
         this.connections.set(c.peer, c);
+        this.lastSeen.set(c.peer, Date.now());
         c.send({ type: "hello", profile: this.localProfile });
         this.sync();
       }
@@ -233,6 +236,7 @@ export class Lobby {
         JSON.stringify(message).length > 16000
       )
         return;
+      this.lastSeen.set(c.peer, Date.now());
       if (this.isHost) {
         if (this.connections.get(c.peer) !== c) return;
         if (
@@ -342,6 +346,7 @@ export class Lobby {
       clearTimeout(timer);
       if (this.closed) return;
       if (this.isHost && this.connections.get(c.peer) !== c) return;
+      this.lastSeen.delete(c.peer);
       this.connections.delete(c.peer);
       if (this.isHost) {
         delete this.players[c.peer];
@@ -449,7 +454,29 @@ export class Lobby {
         p.finish = Math.max(0, (Date.now() - this.race.startAt) / 1000);
     }
   }
+  checkPeerTimeouts(now = Date.now()) {
+    for (const [id, c] of this.connections) {
+      const seen = this.lastSeen.get(id);
+      if (seen === undefined || now - seen <= 20000) continue;
+      if (!this.isHost) {
+        this.fail(
+          "The host stopped responding. The host may have left or lost their connection. Create or join a new lobby.",
+        );
+        return;
+      }
+      c.close();
+      if (this.connections.get(id) === c) {
+        this.connections.delete(id);
+        this.lastSeen.delete(id);
+        delete this.players[id];
+        this.broadcast();
+        this.onChange();
+      }
+    }
+  }
   tick() {
+    if (this.closed) return;
+    this.checkPeerTimeouts();
     if (this.closed) return;
     if (this.isHost) {
       this.triggerMonster();
@@ -490,6 +517,7 @@ export class Lobby {
     clearTimeout(this.reconnectTimer);
     for (const c of this.connections.values()) c.close();
     this.connections.clear();
+    this.lastSeen.clear();
     this.peer?.destroy();
     this.players = {};
     this.phase = "offline";
