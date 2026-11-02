@@ -31,9 +31,15 @@ export class GraphicsQuality {
     this.seconds += dt;
     if (this.seconds >= 3) {
       if (this.frames >= 3 && this.seconds / this.frames > 0.038) {
-        this.scale = Math.max(0.65, this.scale - 0.15);
-        this.shadows = false;
-        this.apply();
+        const next = Math.max(
+          0.65,
+          Math.round((this.scale - 0.15) * 100) / 100,
+        );
+        if (next !== this.scale || this.shadows) {
+          this.scale = next;
+          this.shadows = false;
+          this.apply();
+        }
       }
       this.frames = 0;
       this.seconds = 0;

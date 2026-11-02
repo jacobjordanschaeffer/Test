@@ -6,6 +6,7 @@ function renderer() {
     shadowMap: {},
     setPixelRatio(value) {
       this.ratio = value;
+      this.updates = (this.updates || 0) + 1;
     },
   };
 }
@@ -23,6 +24,10 @@ test("auto mode adapts slow frames and respects a resolution floor", () => {
     q = new GraphicsQuality(r, { ratio: 1.25 });
   for (let i = 0; i < 1000; i++) q.observe(0.05);
   assert.equal(r.ratio, 0.65);
+  assert.ok(
+    r.updates <= 5,
+    "stable low quality should not repeatedly resize the canvas",
+  );
   assert.equal(r.shadowMap.enabled, false);
   q.set("high");
   for (let i = 0; i < 100; i++) q.observe(0.1);
