@@ -778,7 +778,7 @@ function frame(now) {
       makeMonsterEvent(monsterSlot(chaosClock), chaosClock, {
         x: position.x,
         z: position.z,
-        cp,
+        cp: mode === "race" ? cp : undefined,
       }),
     );
   chaos.update(chaosClock, ["drive", "pause", "results"].includes(screen));
@@ -906,7 +906,7 @@ if (new URLSearchParams(location.search).has("qa"))
           makeMonsterEvent(0, chaosTime(), {
             x: position.x,
             z: position.z,
-            cp,
+            cp: mode === "race" ? cp : undefined,
           }),
         );
     },

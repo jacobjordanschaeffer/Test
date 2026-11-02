@@ -1,4 +1,4 @@
-import { route } from "./route.js";
+import { route, distanceToSegment } from "./route.js";
 export const MONSTER_INTERVAL = 42;
 export const MONSTER_FIRST = 18;
 export function seedFrom(value) {
@@ -60,7 +60,26 @@ export function makeMonsterEvent(
   startAt,
   state = { x: 0, z: 7, cp: 0 },
 ) {
-  const segment = Math.max(1, Math.min(route.length - 1, (state.cp || 0) + 1));
+  const nearest = () => {
+    let segment = 1,
+      best = Infinity;
+    for (let i = 1; i < route.length; i++) {
+      const distance = distanceToSegment(
+        state.x,
+        state.z,
+        route[i - 1],
+        route[i],
+      );
+      if (distance < best) {
+        best = distance;
+        segment = i;
+      }
+    }
+    return segment;
+  };
+  const segment = Number.isInteger(state.cp)
+    ? Math.max(1, Math.min(route.length - 1, state.cp + 1))
+    : nearest();
   const a = route[segment - 1],
     b = route[segment],
     dx = b[0] - a[0],

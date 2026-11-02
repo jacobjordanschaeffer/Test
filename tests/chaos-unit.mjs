@@ -63,3 +63,9 @@ test("monster schedule, warning, rubble positions, and wave are shared and bound
   assert.equal(rubblePoints(a).length, 3);
   for (const p of rubblePoints(a)) assert.ok(onRoad(p.x, p.z));
 });
+
+test("free-roam monster events follow the nearby district", () => {
+  const event = makeMonsterEvent(0, 20, { x: 250, z: -1700 });
+  assert.ok(Math.hypot(event.x - 250, event.z + 1700) < 70);
+  assert.ok(onRoad(event.x, event.z));
+});
