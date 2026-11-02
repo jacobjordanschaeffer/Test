@@ -14,7 +14,7 @@ npm run dev
 Open the URL Vite prints in a current desktop Chrome or Edge browser. WebGL and a keyboard are required. Click a menu button to enable browser audio.
 
 ```sh
-npm test          # Six driving-physics and collision checks
+npm test          # Driving physics and lobby protocol checks
 npm run build    # Production output in dist/
 npm run preview  # Serve the production build
 ```
@@ -71,4 +71,4 @@ Single-player remains offline-capable after assets load. Multiplayer needs the p
 
 Start `npm run dev -- --port 5173` and `npm run signal:test` in separate terminals. Then run `npm run test:multiplayer` with an installed Chromium browser (`CHROMIUM_PATH` can override its path). The test uses independent browser contexts, a real local PeerServer, and real WebRTC data channels to check joining, readiness, shared countdown, remote motion/rendering, pause timing, finishing, rematch, and host departure. The QA `simulation` flag skips repeated GPU rendering during network simulation; one explicit frame verifies the remote truck can render. Normal gameplay always renders.
 
-The GitHub Pages workflow runs the multiplayer browser suite on GitHub's hosted runner before deploying. The managed cloud onboarding browser disables non-proxied WebRTC UDP by policy, so it cannot complete this end-to-end test locally; its passing unit checks are distinct from the hosted browser result. Set `TEST_PUBLIC_PEER=1` to test the same browser flow using the public signaling service instead of the local server, where network policy permits.
+The GitHub Pages workflow runs the multiplayer browser suite on GitHub's hosted runner with both local and public signaling before deploying. The managed cloud onboarding browser disables non-proxied WebRTC UDP by policy, so it cannot complete this end-to-end test locally; its passing unit checks are distinct from the hosted browser result. Set `TEST_PUBLIC_PEER=1` to test the same browser flow using the public signaling service instead of the local server, where network policy permits.
