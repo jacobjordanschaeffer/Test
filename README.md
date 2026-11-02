@@ -58,3 +58,17 @@ Vehicle and world geometry, procedural textures, and synthesized audio were crea
 No local applications are needed once the site is deployed. In this repository's **Settings → Pages**, choose **GitHub Actions** as the build source. Then open **Actions → Deploy Tokyo Run to GitHub Pages → Run workflow** (branch `main`). Subsequent pushes to `main` deploy automatically. The workflow runs the physics tests, builds the game, and publishes only `dist/`.
 
 The expected URL after a successful deployment is `https://jacobjordanschaeffer.github.io/Test/`. Check the deployment's output for the actual URL; the address is not live until Pages is enabled and deployment succeeds. GitHub Pages for private repositories requires an eligible paid GitHub plan. This setup does not change repository visibility or purchase a plan.
+
+## Race with friends
+
+Choose **Race with friends**, enter a driver name, and **Create a lobby**. Share **Copy invite link** or the seven-character code. Friends open the same website and join the room. Everyone selects **Ready to race**, then the host selects **Start race**. Up to six drivers share the same course, countdown, visible trucks, minimap markers, and live standings. Choose a truck and paint in the Garage before joining.
+
+Trucks pass through each other to keep casual racing smooth despite network latency. Race time continues if you pause. The host can return everyone to the lobby for a rematch; leaving the host's browser closes the room. Rooms cannot be joined after a race has started. Results update while the remaining drivers finish. This is casual, client-simulated racing, not cheat-resistant ranked competition.
+
+Single-player remains offline-capable after assets load. Multiplayer needs the public PeerJS signaling service (`0.peerjs.com`) and browser WebRTC connections, with Google's public STUN service used for NAT discovery. No player accounts or API keys are needed. The service has no guaranteed uptime, and some school/work networks, VPNs, firewalls, or NAT configurations block peer connections. There is no configured TURN relay or host migration; if a connection times out, use another network or play solo. Keep room codes between your friends.
+
+### Multiplayer validation
+
+Start `npm run dev -- --port 5173` and `npm run signal:test` in separate terminals. Then run `npm run test:multiplayer` with an installed Chromium browser (`CHROMIUM_PATH` can override its path). The test uses independent browser contexts, a real local PeerServer, and real WebRTC data channels to check joining, readiness, shared countdown, remote motion/rendering, pause timing, finishing, rematch, and host departure. The QA `simulation` flag skips repeated GPU rendering during network simulation; one explicit frame verifies the remote truck can render. Normal gameplay always renders.
+
+The GitHub Pages workflow runs the multiplayer browser suite on GitHub's hosted runner before deploying. The managed cloud onboarding browser disables non-proxied WebRTC UDP by policy, so it cannot complete this end-to-end test locally; its passing unit checks are distinct from the hosted browser result. Set `TEST_PUBLIC_PEER=1` to test the same browser flow using the public signaling service instead of the local server, where network policy permits.

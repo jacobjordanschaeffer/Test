@@ -21,12 +21,23 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Test driving physics
         run: npm test
+      - name: Test browser multiplayer with local signaling
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: |
+          npm run dev -- --port 5173 > /tmp/tokyo-vite.log 2>&1 &
+          npm run signal:test > /tmp/tokyo-peer.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://localhost:5173/ > /dev/null && curl -fsS http://localhost:9000/peerjs/peerjs/id > /dev/null; then break; fi
+            sleep 1
+          done
+          npm run test:multiplayer
       - name: Build game
         run: npm run build
       - name: Upload website

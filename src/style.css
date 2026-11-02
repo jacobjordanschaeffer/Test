@@ -373,3 +373,139 @@ input {
     padding: 20px;
   }
 }
+.field input,
+.join-row input {
+  display: block;
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  width: 100%;
+  max-width: 310px;
+  background: #163b34;
+  color: #f3e7c7;
+  border: 1px solid #859b7a77;
+  border-radius: 3px;
+}
+.field {
+  margin: 20px 0 12px;
+}
+.join-row {
+  display: flex;
+  gap: 8px;
+  width: 310px;
+  margin-top: 16px;
+}
+.join-row input {
+  margin: 0;
+  width: 170px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+.join-row button {
+  white-space: nowrap;
+  padding: 10px 15px;
+}
+.online-error {
+  color: #f2b99d;
+  font-size: 12px;
+  max-width: 380px;
+  line-height: 1.5;
+  min-height: 16px;
+}
+.room-code {
+  font:
+    600 44px "Barlow Condensed",
+    sans-serif;
+  letter-spacing: 9px;
+  color: #edc780;
+}
+.lobby-roster {
+  margin-top: 20px;
+  max-width: 380px;
+}
+.lobby-player {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #bac4a52b;
+  font-size: 13px;
+}
+.lobby-player i {
+  width: 10px;
+  height: 30px;
+  border-radius: 2px;
+}
+.lobby-player span {
+  flex: 1;
+}
+.lobby-player small {
+  display: block;
+  font-size: 10px;
+  color: #b6c9b5;
+  margin-top: 4px;
+}
+.lobby-player b {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #e4c081;
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+.standings-panel {
+  position: absolute;
+  top: 125px;
+  right: 30px;
+  background: #173d34dc;
+  border: 1px solid #a7b48a44;
+  padding: 15px;
+  min-width: 240px;
+}
+.standing {
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  font-size: 12px;
+  line-height: 2.3;
+  color: #c4d5c1;
+}
+.standing b {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #d6d4ab;
+}
+.standing.me {
+  color: #f8dda5;
+}
+.results-standings {
+  max-width: 360px;
+  margin: 20px 0;
+}
+.overlay:has(.lobby-roster),
+.overlay:has(#driver-name) {
+  overflow-y: auto;
+  gap: 25px;
+}
+.overlay:has(.lobby-roster) h2 {
+  font-size: 36px;
+}
+@media (max-height: 800px) {
+  .overlay:has(#driver-name) .help {
+    line-height: 1.5;
+  }
+  .overlay:has(#driver-name) .actions {
+    margin-top: 14px;
+  }
+  .overlay:has(#driver-name) h2 {
+    font-size: 36px;
+    margin: 8px 0;
+  }
+  .overlay:has(#driver-name) .subtitle {
+    margin: 6px 0;
+  }
+  .overlay:has(#driver-name) .field {
+    margin: 10px 0;
+  }
+}

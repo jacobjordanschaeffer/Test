@@ -9,6 +9,8 @@ import { makeTruck, trucks, paints } from "./trucks.js";
 import { buildWorld, pedestrians } from "./world.js";
 import { Sound } from "./audio.js";
 import { drive } from "./physics.js";
+import { Lobby, cleanCode, cleanName, MAX_PLAYERS } from "./multiplayer.js";
+import { RemoteTrucks } from "./remote-trucks.js";
 const app = document.querySelector("#app"),
   renderer = new T.WebGLRenderer({
     canvas: document.querySelector("#scene"),
@@ -93,6 +95,129 @@ for (const x of [-0.5, 0.5]) {
   truck.add(l, l.target);
   headlights.push(l);
 }
+const remotes = new RemoteTrucks(scene);
+let lobby = null,
+  onlineError = "",
+  onlineStatus = "",
+  raceStartAt = 0,
+  multiplayerFinished = false;
+const inviteCode = cleanCode(
+  new URLSearchParams(location.hash.slice(1)).get("room"),
+);
+const escapeHTML = (value) =>
+  String(value).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+function leaveLobby() {
+  lobby?.close();
+  lobby = null;
+  remotes.clear();
+  raceStartAt = 0;
+  multiplayerFinished = false;
+  onlineError = "";
+  keys.clear();
+}
+function lobbyChanged() {
+  if (["online", "lobby"].includes(screen)) renderUI();
+  else updateStandings();
+}
+function connectLobby(host) {
+  const name = cleanName(document.querySelector("#driver-name")?.value);
+  const code = cleanCode(document.querySelector("#room-code")?.value);
+  leaveLobby();
+  screen = "lobby";
+  paused = true;
+  onlineStatus = host ? "Creating your room…" : "Finding the host…";
+  // Only local QA sessions may select a local signaling server.
+  const params = new URLSearchParams(location.search);
+  const options =
+    params.has("qa") && params.has("localPeer")
+      ? {
+          host: location.hostname,
+          port: 9000,
+          path: "/peerjs",
+          secure: false,
+          config: { iceServers: [] },
+        }
+      : {};
+  lobby = new Lobby({
+    options,
+    onChange: lobbyChanged,
+    onRace: beginOnlineRace,
+    onEnd: () => {
+      if (lobby?.active) {
+        screen = "lobby";
+        paused = true;
+        remotes.clear();
+        renderUI();
+      }
+    },
+    onError: (message) => {
+      onlineError = message;
+      screen = "online";
+      paused = true;
+      remotes.clear();
+      raceStartAt = 0;
+      renderUI();
+    },
+  });
+  try {
+    if (host) lobby.create({ name, vehicle: selected, paint });
+    else lobby.join(code, { name, vehicle: selected, paint });
+  } catch (e) {
+    leaveLobby();
+    onlineError = e.message;
+    screen = "online";
+  }
+  renderUI();
+}
+function beginOnlineRace(race) {
+  const ids = lobby.roster.map((p) => p.id).sort(),
+    slot = ids.indexOf(lobby.id);
+  multiplayerFinished = false;
+  raceStartAt = race.startAt;
+  start("race");
+  setLight(race.lighting);
+  countdown = Math.max(0, (raceStartAt - lobby.now) / 1000);
+  position.x = ((slot % 3) - 1) * 3;
+  position.z = 7 + Math.floor(slot / 3) * 5;
+  keys.clear();
+}
+function ranking() {
+  return (lobby?.roster || []).slice().sort((a, b) => {
+    if (a.finish && b.finish) return a.finish - b.finish;
+    if (a.finish) return -1;
+    if (b.finish) return 1;
+    const progress = (b.state?.cp || 0) - (a.state?.cp || 0);
+    if (progress) return progress;
+    const next = checkpoints[Math.min(a.state?.cp || 0, 20)];
+    const distance = (p) =>
+      p.state ? Math.hypot(p.state.x - next[0], p.state.z - next[1]) : Infinity;
+    return distance(a) - distance(b);
+  });
+}
+function updateStandings() {
+  const list = document.querySelector("#standings");
+  if (!list || !lobby?.active) return;
+  list.replaceChildren(
+    ...ranking().map((p, i) => {
+      const row = document.createElement("div");
+      row.className = "standing" + (p.id === lobby.id ? " me" : "");
+      const name = document.createElement("span");
+      name.textContent = `${i + 1}. ${p.name}${p.id === lobby.id ? " (you)" : ""}`;
+      const result = document.createElement("b");
+      result.textContent = p.finish
+        ? format(p.finish)
+        : `${p.state?.cp || 0} / ${checkpoints.length}`;
+      row.append(name, result);
+      return row;
+    }),
+  );
+}
 function changeTruck() {
   scene.remove(truck);
   truck = makeTruck(selected, paint);
@@ -147,12 +272,12 @@ function button(text, action, primary = false) {
 }
 function renderUI() {
   if (screen === "drive" && !paused) {
-    app.innerHTML = `<div class="hud"><div class="hud-top"><div class="location"><span id="mode-label">${mode === "race" ? "TOKYO RUN / CHECKPOINT 01" : "FREE ROAM / NO WRONG TURNS"}</span><strong id="district">Temple District</strong></div><div class="timer"><small>${mode === "race" ? "ELAPSED TIME" : "THE CITY IS YOURS"}</small><span id="timer">${mode === "race" ? "00:00.00" : "東京散歩"}</span></div></div><canvas class="map ${minimap ? "" : "hidden"}" width="380" height="450"></canvas><div class="camera-label">C · <span id="camera-name">${cameraNames[cameraMode]}</span></div><div class="speed"><div class="gear" id="gear">N</div><b id="speed">0</b> <span>KM/H</span></div><div class="hint">WASD DRIVE &nbsp; SPACE HANDBRAKE &nbsp; R RESET &nbsp; ESC PAUSE</div><div class="countdown"></div></div>`;
+    app.innerHTML = `<div class="hud"><div class="hud-top"><div class="location"><span id="mode-label">${mode === "race" ? "TOKYO RUN / CHECKPOINT 01" : "FREE ROAM / NO WRONG TURNS"}</span><strong id="district">Temple District</strong></div><div class="timer"><small>${mode === "race" ? "ELAPSED TIME" : "THE CITY IS YOURS"}</small><span id="timer">${mode === "race" ? "00:00.00" : "東京散歩"}</span></div></div><canvas class="map ${minimap ? "" : "hidden"}" width="380" height="450"></canvas><div class="camera-label">C · <span id="camera-name">${cameraNames[cameraMode]}</span></div><div class="speed"><div class="gear" id="gear">N</div><b id="speed">0</b> <span>KM/H</span></div><div class="hint">WASD DRIVE &nbsp; SPACE HANDBRAKE &nbsp; R RESET &nbsp; ESC PAUSE</div><div class="countdown"></div>${lobby?.active ? '<aside class="standings-panel"><div class="eyebrow">FRIENDS / LIVE STANDINGS</div><div id="standings"></div></aside>' : ""}</div>`;
     return;
   }
   let content = "";
   if (screen === "home")
-    content = `<div class="eyebrow">小さなトラック、大きな冒険。</div><h1>TOKYO<br><span>RUN.</span></h1><p class="subtitle">Little truck. Big city.<br>Find your own rhythm through the streets of Tokyo.</p><div class="actions">${button("Start Tokyo Run <span>→</span>", "race", true)}${button("Free Roam <span>→</span>", "free")}${button("The Garage <span>06</span>", "garage")}${button("Settings <span>⚙</span>", "settings")}</div>`;
+    content = `<div class="eyebrow">小さなトラック、大きな冒険。</div><h1>TOKYO<br><span>RUN.</span></h1><p class="subtitle">Little truck. Big city.<br>Find your own rhythm through the streets of Tokyo.</p><div class="actions">${button("Start Tokyo Run <span>→</span>", "race", true)}${button("Free Roam <span>→</span>", "free")}${button("Race with friends <span>ONLINE</span>", "online")}${button("The Garage <span>06</span>", "garage")}${button("Settings <span>⚙</span>", "settings")}</div>`;
   if (screen === "garage")
     content = `<div class="eyebrow">THE GARAGE / 0${selected + 1} OF 06</div><h2>${trucks[selected].name}</h2><p class="subtitle">${trucks[selected].year}<br>${trucks[selected].tag}</p><div class="row">${button("←", "prev")}${button("→", "next")}</div><div class="chips">${paints.map((c) => `<button aria-label="Paint ${c}" data-paint="${c}" class="paint ${c === paint ? "selected" : ""}" style="background:${c}"></button>`).join("")}</div>${[
       ["POWER", trucks[selected].power],
@@ -166,13 +291,25 @@ function renderUI() {
       .join(
         "",
       )}<div class="actions">${button("Take it for a drive ↗", "free", true)}${button("Back", "back")}</div>`;
+  if (screen === "online")
+    content = `<div class="eyebrow">KEI TRUCK CLUB / UP TO ${MAX_PLAYERS} DRIVERS</div><h2>Bring your crew.</h2><p class="subtitle">Create a room, share the link, and race from the temple to the tower together.</p><label class="field">Your name<input id="driver-name" maxlength="18" value="Driver" autocomplete="nickname"></label><div class="actions">${button("Create a lobby →", "create-room", true)}</div><div class="join-row"><input id="room-code" maxlength="7" placeholder="ROOM CODE" aria-label="Room code" value="${inviteCode}">${button("Join room", "join-room")}</div><p class="online-error" role="status">${escapeHTML(onlineError)}</p><p class="help">Choose your truck and paint in the Garage first.<br>Host stays online. The race continues while paused.<br>Players pass through each other for smooth, casual racing.</p><div class="actions">${button("Back", "home")}</div>`;
+  if (screen === "lobby") {
+    const connected = lobby?.phase === "lobby";
+    const roster = lobby?.roster || [];
+    const ready = roster.length >= 2 && roster.every((p) => p.ready);
+    const me = lobby?.players[lobby.id];
+    content = `<div class="eyebrow">PRIVATE LOBBY / ${roster.length} OF ${MAX_PLAYERS}</div><h2>${connected ? "Your crew is gathering." : onlineStatus}</h2>${connected ? `<div class="room-code">${lobby.code}</div><p class="help">Share this room code or send your friends an invite.</p><div class="row">${button("Copy invite link", "copy-invite")}${button("Copy code", "copy-code")}</div><div class="lobby-roster">${roster.map((p) => `<div class="lobby-player"><i style="background:${p.paint}"></i><span>${escapeHTML(p.name)}${p.id === lobby.id ? " (you)" : ""}<small>${trucks[p.vehicle].name}</small></span><b>${p.id === Object.keys(lobby.players)[0] ? "HOST" : p.ready ? "READY" : "WAITING"}</b></div>`).join("")}</div><div class="actions">${lobby.host ? `<button class="primary" data-action="start-online" ${ready ? "" : "disabled"}>Start race →</button>` : button(me?.ready ? "Not ready" : "Ready to race →", "ready", !me?.ready)}</div><p class="help">${lobby.host ? "At least two drivers must be ready to start." : "The host starts when everyone is ready."}</p>` : ""}<div class="actions">${button("Leave lobby", "leave-room")}</div>`;
+  }
   if (screen === "settings")
     content = `<div class="eyebrow">MAKE YOURSELF AT HOME</div><h2>City settings</h2><label>Time of day <select id="lighting">${["Afternoon", "Sunset", "Night"].map((x) => `<option ${x === lighting ? "selected" : ""}>${x}</option>`).join("")}</select></label><label>Volume <input id="volume" type="range" min="0" max="1" step=".01" value="${sound.volume}"></label><label>Mute <input id="mute" type="checkbox" ${sound.muted ? "checked" : ""}></label><p class="help">W / ↑ Accelerate · S / ↓ Brake & reverse<br>A D / ← → Steer · Space Handbrake<br>C Camera · R Reset · M Minimap · Esc Pause<br>Controller: RT accelerate · LT brake · Left stick steer<br>A handbrake · Y camera · Start pause</p><div class="actions">${button("Back", "back", true)}</div>`;
   if (screen === "pause")
-    content = `<div class="eyebrow">TAKE A BREATHER</div><h2>Parked for a moment.</h2><div class="actions">${button("Resume →", "resume", true)}${button("Restart", "restart")}${mode === "free" ? button("Change vehicle", "garage") : ""}${button("Settings", "settings")}${button("Main menu", "home")}</div>`;
+    content = `<div class="eyebrow">TAKE A BREATHER</div><h2>Parked for a moment.</h2><div class="actions">${button("Resume →", "resume", true)}${lobby?.active ? "" : button("Restart", "restart")}${mode === "free" ? button("Change vehicle", "garage") : ""}${button("Settings", "settings")}${button(lobby?.active ? "Leave race" : "Main menu", "home")}</div>`;
   if (screen === "results")
-    content = `<div class="eyebrow">TOKYO RUN / COMPLETE</div><h2>You took the scenic route.</h2><div class="results-time">${format(elapsed)}</div><p class="subtitle">Personal best: ${format(best || elapsed)}<br>Temple District → Skytree District</p><div class="actions">${button("One more run ↗", "race", true)}${button("Explore the city", "free")}${button("Main menu", "home")}</div>`;
+    content = `<div class="eyebrow">TOKYO RUN / COMPLETE</div><h2>You took the scenic route.</h2><div class="results-time">${format(elapsed)}</div><p class="subtitle">Personal best: ${format(best || elapsed)}<br>Temple District → Skytree District</p><div class="actions">${button("One more run ↗", "race", true)}${button("Explore the city", "free")}${button(lobby?.active ? "Leave race" : "Main menu", "home")}</div>`;
+  if (screen === "results" && lobby?.active)
+    content = `<div class="eyebrow">FRIENDS / TOKYO RUN</div><h2>Across the line.</h2><div class="results-time">${format(elapsed)}</div><aside class="results-standings"><div id="standings"></div></aside><p class="help">Results update as the rest of the crew finishes.</p><div class="actions">${lobby.host ? button("Return everyone to lobby", "return-lobby", true) : '<p class="help">Wait for the host to return to the lobby.</p>'}${button("Leave room", "leave-room")}</div>`;
   app.innerHTML = `<section class="overlay"><header class="brand"><span class="mark">東</span> TOKYO RUN <span style="color:#829b8a">/</span> KEI TRUCK CLUB</header><div class="edition">VOL. 01 &nbsp; — &nbsp; THE TOKYO EDITION</div><div class="menu-content">${content}</div><footer class="bottom"><div>HANDCRAFTED STREETS. UNHURRIED ADVENTURES.<br><b>浅草 → スカイツリー &nbsp; / &nbsp; ${lighting.toUpperCase()} SESSION</b></div><div class="stamp">JAPANESE SOUL.<br>660cc OF FREEDOM.</div></footer></section>`;
+  updateStandings();
   app
     .querySelectorAll("[data-action]")
     .forEach((b) => (b.onclick = () => action(b.dataset.action)));
@@ -196,6 +333,44 @@ function renderUI() {
 }
 let returnScreen = "home";
 function action(a) {
+  if (a === "create-room" || a === "join-room") {
+    sound.start();
+    connectLobby(a === "create-room");
+    return;
+  }
+  if (a === "leave-room") {
+    leaveLobby();
+    screen = "home";
+    paused = true;
+    renderUI();
+    return;
+  }
+  if (a === "ready") {
+    lobby.ready(!lobby.players[lobby.id]?.ready);
+    return;
+  }
+  if (a === "start-online") {
+    lobby?.begin(lighting);
+    return;
+  }
+  if (a === "return-lobby") {
+    lobby?.back();
+    return;
+  }
+  if (a === "copy-code" || a === "copy-invite") {
+    const url = new URL(location.href);
+    url.search = "";
+    url.hash = "room=" + lobby.code;
+    const value = a === "copy-code" ? lobby.code : url.href;
+    if (navigator.clipboard?.writeText)
+      navigator.clipboard
+        .writeText(value)
+        .then(() => toast("Copied!"))
+        .catch(() => window.prompt("Copy and share this invite:", value));
+    else window.prompt("Copy and share this invite:", value);
+    return;
+  }
+  if (a === "home" && lobby?.active) leaveLobby();
   sound.start();
   sound.beep(700, 0.045);
   if (a === "race" || a === "free") {
@@ -235,6 +410,11 @@ function pause() {
   renderUI();
 }
 window.addEventListener("keydown", (e) => {
+  if (
+    e.target instanceof HTMLInputElement ||
+    e.target instanceof HTMLSelectElement
+  )
+    return;
   if (
     ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(
       e.code,
@@ -331,6 +511,14 @@ function mapDraw() {
     ctx.arc(...checkpoints[cp], 45, 0, Math.PI * 2);
     ctx.fill();
   }
+  if (lobby?.phase === "race")
+    for (const p of lobby.roster) {
+      if (p.id === lobby.id || !p.state) continue;
+      ctx.fillStyle = p.paint;
+      ctx.beginPath();
+      ctx.arc(p.state.x, p.state.z, 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
   ctx.translate(position.x, position.z);
   ctx.rotate(yaw);
   ctx.fillStyle = "#f7edd0";
@@ -353,19 +541,23 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.15);
   last = now;
   time += dt;
+  if (lobby?.phase === "race" && !multiplayerFinished) {
+    elapsed = Math.max(0, (lobby.now - raceStartAt) / 1000);
+    countdown = Math.max(0, (raceStartAt - lobby.now) / 1000);
+  }
   const input = controls(),
     active = screen === "drive" && !paused;
   if (active) {
     if (countdown > 0) {
       const old = Math.ceil(countdown);
-      countdown -= dt;
+      if (!lobby?.active) countdown -= dt;
       if (Math.ceil(countdown) !== old)
         sound.beep(countdown > 0 ? 550 : 900, 0.15);
       document.querySelector(".countdown").textContent =
         countdown > 0 ? Math.ceil(countdown) : "GO";
     } else {
       document.querySelector(".countdown").textContent = "";
-      elapsed += dt;
+      if (!lobby?.active) elapsed += dt;
       const spec = trucks[selected];
       const state = {
         x: position.x,
@@ -401,6 +593,16 @@ function frame(now) {
         cp++;
         sound.beep(900, 0.1);
         if (cp === checkpoints.length) {
+          multiplayerFinished = !!lobby?.active;
+          if (lobby?.active)
+            lobby.update({
+              x: position.x,
+              z: position.z,
+              yaw,
+              speed,
+              cp,
+              brake: true,
+            });
           best = best ? Math.min(best, elapsed) : elapsed;
           try {
             localStorage.setItem("tokyo-run-best", String(best));
@@ -482,7 +684,8 @@ function frame(now) {
   } else if (
     screen !== "pause" &&
     !(returnScreen === "pause" && ["settings", "garage"].includes(screen)) &&
-    screen !== "results"
+    screen !== "results" &&
+    !lobby?.race
   ) {
     truck.visible = true;
     truck.position.set(0, 0, 7);
@@ -509,8 +712,25 @@ function frame(now) {
   sound.update(speed, input.throttle, active, input.hand, input.brake);
   if (toastTime > 0 && (toastTime -= dt) <= 0)
     document.querySelector(".toast")?.remove();
-  renderer.render(scene, camera);
+  if (lobby?.phase === "race") {
+    lobby.update({
+      x: position.x,
+      z: position.z,
+      yaw,
+      speed,
+      cp,
+      brake: !!input.brake || input.hand,
+    });
+    remotes.update(lobby.roster, lobby.id, dt, true);
+    updateStandings();
+  } else remotes.update([], null, dt, false);
+  if (!(
+    new URLSearchParams(location.search).has("qa") &&
+    new URLSearchParams(location.search).has("simulation")
+  ))
+    renderer.render(scene, camera);
 }
+if (inviteCode) screen = "online";
 renderUI();
 setLight("Sunset");
 requestAnimationFrame(frame);
@@ -529,6 +749,16 @@ if (new URLSearchParams(location.search).has("qa"))
       selected,
       paint,
       countdown,
+      online: lobby
+        ? {
+            phase: lobby.phase,
+            code: lobby.code,
+            players: lobby.roster,
+            host: lobby.host,
+            race: lobby.race,
+            remotes: remotes.models.size,
+          }
+        : null,
       drawCalls: renderer.info.render.calls,
       triangles: renderer.info.render.triangles,
     }),
@@ -537,7 +767,11 @@ if (new URLSearchParams(location.search).has("qa"))
       speed = 0;
       velocity.set(0, 0);
     },
-    skipCountdown: () => (countdown = 0),
+    skipCountdown: () => {
+      countdown = 0;
+      if (lobby?.race) raceStartAt = lobby.now;
+    },
+    renderFrame: () => renderer.render(scene, camera),
     route,
     boxes: world.boxes,
   };

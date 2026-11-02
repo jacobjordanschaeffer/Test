@@ -7,17 +7,21 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node tests/physics.test.js",
-    "test:browser": "node tests/browser.mjs"
+    "test": "node tests/physics.test.js && node tests/multiplayer-unit.mjs",
+    "test:browser": "node tests/browser.mjs",
+    "test:multiplayer": "node tests/multiplayer.mjs",
+    "signal:test": "peerjs --port 9000 --path /peerjs"
   },
   "dependencies": {
     "@fontsource/barlow-condensed": "^5.3.0",
     "@fontsource/inter": "^5.3.0",
+    "peerjs": "^1.5.5",
     "three": "^0.180.0",
     "vite": "^7.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
+    "peer": "^1.0.2",
     "prettier": "^3.9.10"
   }
 }
