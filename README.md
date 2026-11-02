@@ -52,3 +52,9 @@ For software-rendered/headless machines, append `?low` to reduce render resoluti
 ## Assets and licensing
 
 Vehicle and world geometry, procedural textures, and synthesized audio were created for this project. Three.js and Vite are MIT-licensed. Locally bundled Inter and Barlow Condensed fonts are distributed through Fontsource under the SIL Open Font License; their license files are included in `public/licenses/` and copied into production builds. No remote fonts, images, or audio are requested at runtime.
+
+## Play in a browser with GitHub Pages
+
+No local applications are needed once the site is deployed. In this repository's **Settings → Pages**, choose **GitHub Actions** as the build source. Then open **Actions → Deploy Tokyo Run to GitHub Pages → Run workflow** (branch `main`). Subsequent pushes to `main` deploy automatically. The workflow runs the physics tests, builds the game, and publishes only `dist/`.
+
+The expected URL after a successful deployment is `https://jacobjordanschaeffer.github.io/Test/`. Check the deployment's output for the actual URL; the address is not live until Pages is enabled and deployment succeeds. GitHub Pages for private repositories requires an eligible paid GitHub plan. This setup does not change repository visibility or purchase a plan.
