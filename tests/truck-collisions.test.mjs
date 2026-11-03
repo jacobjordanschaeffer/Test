@@ -71,3 +71,13 @@ test("impacts do not push through solid scenery and invalid impulses are rejecte
     false,
   );
 });
+
+test("angled overlapping bodies are fully separated by one contact correction", () => {
+  const a = body("a", 0, -60, 0, 0),
+    b = body("b", 0.2, -60, 0, Math.PI / 4);
+  const hit = truckContact(a, b);
+  assert.ok(hit);
+  applyTruckBump(a.state, hit.a, [], resolveCollision);
+  applyTruckBump(b.state, hit.b, [], resolveCollision);
+  assert.equal(truckContact(a, b), null);
+});

@@ -93,7 +93,7 @@ export function truckContact(a, b, previousA, previousB) {
     vb = velocity(sb),
     closing = (vb.x - va.x) * normal.x + (vb.z - va.z) * normal.z;
   const impulse = Math.min(45, Math.max(0, -closing * 0.65)),
-    separation = Math.min(0.85, depth * 0.5 + 0.03);
+    separation = Math.min(2, depth * 0.5 + 0.03);
   function impact(s, sign) {
     const dvx = normal.x * impulse * sign,
       dvz = normal.z * impulse * sign;
