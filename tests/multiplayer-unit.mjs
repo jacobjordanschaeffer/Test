@@ -121,53 +121,6 @@ test("lobby admits six drivers, rejects overflow, and locks after race starts", 
   }
 });
 
-test("lobby renaming and host-controlled monster schedule preserve shared race state", () => {
-  const room = new Lobby();
-  room.isHost = true;
-  room.id = "host";
-  room.phase = "lobby";
-  room.players = {
-    host: {
-      id: "host",
-      name: "Host",
-      ready: true,
-      state: { x: 0, z: -30, cp: 0 },
-    },
-    guest: {
-      id: "guest",
-      name: "Friend",
-      ready: true,
-      state: { x: 0, z: 7, cp: 0 },
-    },
-  };
-  const connection = new Connection("guest");
-  try {
-    room.attach(connection);
-    connection.emit("open");
-    room.rename("Road Captain");
-    assert.equal(room.players.host.name, "Road Captain");
-    connection.emit("data", { type: "rename", name: "<New Friend>" });
-    assert.equal(room.players.guest.name, "New Friend");
-    assert.equal(room.players.guest.ready, true);
-    assert.ok(room.begin());
-    room.race.startAt = Date.now() - 20000;
-    room.players.host.state = { x: 0, z: -30, cp: 0 };
-    room.triggerMonster();
-    assert.equal(room.race.chaos.id, 0);
-    const event = room.race.chaos;
-    room.triggerMonster();
-    assert.deepEqual(room.race.chaos, event);
-    connection.emit("data", { type: "rename", name: "During race" });
-    assert.equal(room.players.guest.name, "New Friend");
-    room.race.startAt = Date.now() - 62000;
-    room.triggerMonster();
-    assert.equal(room.race.chaos.id, 1);
-  } finally {
-    room.close();
-    connection.close();
-  }
-});
-
 test("healthy guest connection survives the 18-second handshake deadline", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const room = new Lobby();
@@ -300,4 +253,52 @@ test("heartbeat watchdog tolerates live traffic and detects a vanished host", ()
   room.checkPeerTimeouts(now + 40001);
   assert.equal(room.closed, true);
   assert.equal(c.open, false);
+});
+
+test("host resolves truck contacts once and guests deduplicate authoritative impulses", () => {
+  let hostHits = 0;
+  const host = new Lobby({ onBump: () => hostHits++ });
+  host.isHost = true;
+  host.id = "host";
+  host.phase = "race";
+  host.race = { id: "race", startAt: Date.now() - 100 };
+  host.players = {
+    host: {
+      id: "host",
+      vehicle: 0,
+      state: { x: 0, z: -60, yaw: 0, speed: 20, cp: 0 },
+    },
+    guest: {
+      id: "guest",
+      vehicle: 0,
+      state: { x: 0, z: -62, yaw: 0, speed: 0, cp: 0 },
+    },
+  };
+  const wire = new Connection("guest");
+  host.connections.set("guest", wire);
+  host.resolveTruckContacts();
+  assert.equal(hostHits, 1);
+  const packet = wire.messages.find((m) => m.type === "bump");
+  assert.ok(packet.impacts.guest);
+  host.resolveTruckContacts();
+  assert.equal(hostHits, 1);
+  let guestHits = 0;
+  const guest = new Lobby({ onBump: () => guestHits++ });
+  guest.isHost = false;
+  guest.id = "guest";
+  guest.phase = "race";
+  guest.race = { id: "race" };
+  const link = new Connection("host");
+  try {
+    guest.attach(link);
+    link.emit("open");
+    link.emit("data", packet);
+    link.emit("data", packet);
+    assert.equal(guestHits, 1);
+    link.emit("data", { ...packet, id: "stale", race: "another" });
+    assert.equal(guestHits, 1);
+  } finally {
+    host.close();
+    guest.close();
+  }
 });

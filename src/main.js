@@ -13,9 +13,10 @@ import { buildWorld, pedestrians } from "./world.js";
 import { Sound } from "./audio.js";
 import { drive } from "./physics.js";
 import { ChaosCourse } from "./chaos.js";
-import { seedFrom, makeMonsterEvent, monsterSlot } from "./chaos-rules.js";
-import { indexCollisions } from "./route.js";
+import { seedFrom } from "./chaos-rules.js";
+import { indexCollisions, resolveCollision, isPavedSurface } from "./route.js";
 import { Lobby, cleanCode, cleanName, MAX_PLAYERS } from "./multiplayer.js";
+import { applyTruckBump } from "./truck-collisions.js";
 import { RemoteTrucks } from "./remote-trucks.js";
 const app = document.querySelector("#app"),
   renderer = new T.WebGLRenderer({
@@ -91,22 +92,32 @@ function rememberName(name) {
 }
 const chaos = new ChaosCourse(scene);
 let collisionBoxes = indexCollisions([...world.boxes, ...chaos.blocks]),
-  monsterNotice = -1;
+  grassAmount = 0,
+  pendingBumps = [],
+  bumpCount = 0;
 function rebuildChaos(seed) {
   chaos.build(seed);
   collisionBoxes = indexCollisions([...world.boxes, ...chaos.blocks]);
-  monsterNotice = -1;
+  grassAmount = 0;
+  pendingBumps = [];
+  bumpCount = 0;
 }
 function chaosTime() {
   return lobby?.race ? Math.max(0, (lobby.now - raceStartAt) / 1000) : elapsed;
+}
+function drainBumps(state) {
+  if (!pendingBumps.length) return;
+  for (const impact of pendingBumps)
+    applyTruckBump(state, impact, collisionBoxes, resolveCollision);
+  pendingBumps = [];
+  chaos.effects.bumpUntil = chaosTime() + 0.3;
+  sound.beep(95, 0.08);
 }
 function hazardFeedback(type) {
   const messages = {
     boost: "BOOST! + SPEED",
     pothole: "POTHOLE! Hold your line",
     oil: "OIL SLICK! Ease off the steering",
-    rubble: "GODZILLA RUBBLE!",
-    shockwave: "ATOMIC SHOCKWAVE!",
   };
   toast(messages[type] || type);
   sound.beep(type === "boost" ? 1000 : 75, 0.18);
@@ -191,6 +202,10 @@ function connectLobby(host) {
   lobby = new Lobby({
     options,
     onChange: lobbyChanged,
+    onBump: (impact) => {
+      if (pendingBumps.length < 16) pendingBumps.push(impact);
+      bumpCount++;
+    },
     onRace: beginOnlineRace,
     onEnd: () => {
       if (lobby?.active) {
@@ -292,6 +307,8 @@ function reset() {
   yaw = Math.atan2(-(next[0] - p[0]), -(next[1] - p[1]));
   speed = 0;
   velocity.set(0, 0);
+  grassAmount = 0;
+  pendingBumps = [];
   chaos.effects.reset();
 }
 function start(m) {
@@ -351,7 +368,7 @@ function renderUI() {
         "",
       )}<div class="actions">${button("Take it for a drive ↗", "free", true)}${button("Back", "back")}</div>`;
   if (screen === "online")
-    content = `<div class="eyebrow">KEI TRUCK CLUB / UP TO ${MAX_PLAYERS} DRIVERS</div><h2>Bring your crew.</h2><p class="subtitle">Create a room, share the link, and race from the temple to the tower together.</p><label class="field">Your name<input id="driver-name" maxlength="18" value="${escapeHTML(preferredName)}" autocomplete="nickname"></label><div class="actions">${button("Create a lobby →", "create-room", true)}</div><div class="join-row"><input id="room-code" maxlength="7" placeholder="ROOM CODE" aria-label="Room code" value="${inviteCode}">${button("Join room", "join-room")}</div><p class="online-error" role="status">${escapeHTML(onlineError)}</p><p class="help">Choose your truck and paint in the Garage first.<br>Host stays online. The race continues while paused.<br>Players pass through each other for smooth, casual racing.</p><div class="actions">${button("Back", "home")}</div>`;
+    content = `<div class="eyebrow">KEI TRUCK CLUB / UP TO ${MAX_PLAYERS} DRIVERS</div><h2>Bring your crew.</h2><p class="subtitle">Create a room, share the link, and race from the temple to the tower together.</p><label class="field">Your name<input id="driver-name" maxlength="18" value="${escapeHTML(preferredName)}" autocomplete="nickname"></label><div class="actions">${button("Create a lobby →", "create-room", true)}</div><div class="join-row"><input id="room-code" maxlength="7" placeholder="ROOM CODE" aria-label="Room code" value="${inviteCode}">${button("Join room", "join-room")}</div><p class="online-error" role="status">${escapeHTML(onlineError)}</p><p class="help">Choose your truck and paint in the Garage first.<br>Host stays online. The race continues while paused.<br>Trucks can bump each other. Keep the host tab active.</p><div class="actions">${button("Back", "home")}</div>`;
   if (screen === "lobby") {
     const connected = lobby?.phase === "lobby";
     const roster = lobby?.roster || [];
@@ -634,6 +651,21 @@ function frame(now) {
   }
   const input = controls(),
     active = screen === "drive" && !paused;
+  if (!active && pendingBumps.length && lobby?.phase === "race") {
+    const state = {
+      x: position.x,
+      z: position.z,
+      speed,
+      yaw,
+      vx: velocity.x,
+      vz: velocity.y,
+    };
+    drainBumps(state);
+    position.set(state.x, 0, state.z);
+    truck.position.copy(position);
+    ({ speed, yaw } = state);
+    velocity.set(state.vx, state.vz);
+  }
   if (active) {
     if (countdown > 0) {
       const old = Math.ceil(countdown);
@@ -655,7 +687,9 @@ function frame(now) {
         steer,
         vx: velocity.x,
         vz: velocity.y,
+        offroad: grassAmount,
       };
+      drainBumps(state);
       chaos.apply(state, clock, hazardFeedback);
       spec = chaos.effects.specification(trucks[selected], clock);
       let hit = false;
@@ -669,6 +703,7 @@ function frame(now) {
             collisionBoxes,
           ) || hit;
       ({ speed, yaw, steer } = state);
+      grassAmount = state.offroad || 0;
       position.set(state.x, 0, state.z);
       velocity.set(state.vx, state.vz);
       if (hit) sound.beep(70, 0.08);
@@ -691,6 +726,8 @@ function frame(now) {
               yaw,
               speed,
               cp,
+              vx: velocity.x,
+              vz: velocity.y,
               brake: true,
             });
           best = best ? Math.min(best, elapsed) : elapsed;
@@ -790,41 +827,17 @@ function frame(now) {
     camera.lookAt(-5, 1, 7);
   }
   const chaosClock = chaosTime();
-  if (lobby?.race) chaos.setEvent(lobby.race.chaos || null);
-  else if (
-    active &&
-    monsterSlot(chaosClock) >= 0 &&
-    monsterSlot(chaosClock) > (chaos.event?.id ?? -1)
-  )
-    chaos.setEvent(
-      makeMonsterEvent(monsterSlot(chaosClock), chaosClock, {
-        x: position.x,
-        z: position.z,
-        cp: mode === "race" ? cp : undefined,
-      }),
-    );
   chaos.update(chaosClock, ["drive", "pause", "results"].includes(screen));
-  if (chaos.event && chaos.event.id !== monsterNotice) {
-    monsterNotice = chaos.event.id;
-    if (active) {
-      toast("GODZILLA ALERT! Avoid the marked impact zones");
-      sound.beep(65, 0.45);
-    }
-  }
   const chaosStatus = document.querySelector("#chaos-status");
   if (chaosStatus) {
-    const age = chaos.event ? chaosClock - chaos.event.startAt : -1;
     chaosStatus.textContent =
-      age >= 0 && age < 3
-        ? "GODZILLA INCOMING · WATCH THE AMBER RINGS"
-        : chaosClock < chaos.effects.boostUntil
-          ? "BOOST ACTIVE"
-          : chaosClock < chaos.effects.oilUntil
-            ? "OIL SLICK · LOW GRIP"
-            : age >= 3 && age < 14
-              ? "GODZILLA ATTACK · DODGE THE RUBBLE"
-              : "";
-    chaosStatus.classList.toggle("danger", age >= 0 && age < 14);
+      chaosClock < chaos.effects.boostUntil
+        ? "BOOST ACTIVE"
+        : chaosClock < chaos.effects.oilUntil
+          ? "OIL SLICK · LOW GRIP"
+          : grassAmount > 0.3
+            ? "GRASS · SLOW GOING"
+            : "";
   }
   checkpoint.visible = mode === "race" && active && cp < checkpoints.length;
   if (checkpoint.visible) {
@@ -860,6 +873,8 @@ function frame(now) {
       yaw,
       speed,
       cp,
+      vx: velocity.x,
+      vz: velocity.y,
       brake: !!input.brake || input.hand,
     });
     remotes.update(lobby.roster, lobby.id, dt, true);
@@ -891,12 +906,14 @@ if (new URLSearchParams(location.search).has("qa"))
         scale: graphics.scale,
         shadows: graphics.shadows,
       },
+      surface: isPavedSurface(position.x, position.z) ? "paved" : "grass",
+      grassAmount,
+      bumpCount,
       chaos: {
         hazards: chaos.hazards,
         boostUntil: chaos.effects.boostUntil,
         oilUntil: chaos.effects.oilUntil,
         lastHit: chaos.effects.lastHit,
-        event: chaos.event,
         clock: chaosTime(),
       },
       online: lobby
@@ -913,6 +930,12 @@ if (new URLSearchParams(location.search).has("qa"))
       drawCalls: renderer.info.render.calls,
       triangles: renderer.info.render.triangles,
     }),
+    place: (x, z, heading = 0, s = 0) => {
+      position.set(x, 0, z);
+      yaw = heading;
+      speed = s;
+      velocity.set(-Math.sin(yaw) * s, -Math.cos(yaw) * s);
+    },
     teleport: (x, z) => {
       position.set(x, 0, z);
       speed = 0;
@@ -925,17 +948,6 @@ if (new URLSearchParams(location.search).has("qa"))
     disconnectSignaling: () => lobby?.peer?.disconnect(),
     advanceChaos: (seconds) => {
       if (!lobby?.active) elapsed += seconds;
-    },
-    monster: () => {
-      if (lobby?.host) lobby.triggerMonster(true);
-      else
-        chaos.setEvent(
-          makeMonsterEvent(0, chaosTime(), {
-            x: position.x,
-            z: position.z,
-            cp: mode === "race" ? cp : undefined,
-          }),
-        );
     },
     hazard: (type) => {
       const h = chaos.hazards.find((h) => h.type === type);

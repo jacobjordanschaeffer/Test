@@ -126,13 +126,19 @@ try {
     (await state(host)).chaos.hazards,
     (await state(guest)).chaos.hazards,
   );
-  await host.evaluate(() => gameQA.monster());
-  await guest.waitForFunction(() => gameQA.getState().chaos.event?.id === 0);
-  assert.deepEqual(
-    (await state(host)).chaos.event,
-    (await state(guest)).chaos.event,
-  );
-  console.log("Hazard layout and monster attacks synchronize across browsers");
+  stage = "physical trucks";
+  await host.keyboard.press("Escape");
+  if ((await state(guest)).screen === "drive")
+    await guest.keyboard.press("Escape");
+  await host.evaluate(() => gameQA.place(0, -60, 0, 20));
+  await guest.evaluate(() => gameQA.place(0, -62, 0, 0));
+  await host.waitForFunction(() => gameQA.getState().bumpCount > 0);
+  await guest.waitForFunction(() => gameQA.getState().bumpCount > 0);
+  await host.locator("[data-action=resume]").click();
+  await guest.locator("[data-action=resume]").click();
+  await host.waitForFunction(() => gameQA.getState().speed < 18);
+  await guest.waitForFunction(() => gameQA.getState().speed > 2);
+  console.log("Host and guest receive physical contact impulses");
 
   stage = "pause and finish";
   await host.keyboard.press("Escape");

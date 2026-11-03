@@ -1,10 +1,11 @@
 import PeerModule from "peerjs";
 const Peer = PeerModule.Peer || PeerModule;
-import { makeMonsterEvent, monsterSlot, seedFrom } from "./chaos-rules.js";
+import { seedFrom } from "./chaos-rules.js";
+import { truckContact, validBump } from "./truck-collisions.js";
 
 export const MAX_PLAYERS = 6;
 // Keep older cached clients out of races with the new shared hazard rules.
-const PREFIX = "tokyo-run-v2-";
+const PREFIX = "tokyo-run-v3-";
 export const cleanName = (value) =>
   String(typeof value === "string" ? value : "Driver")
     .replace(/[<>\x00-\x1f]/g, "")
@@ -23,6 +24,9 @@ export function validState(s) {
     s.z > -3500 &&
     s.z < 150 &&
     Math.abs(s.speed) < 60 &&
+    [s.vx, s.vz].every(
+      (v) => v === undefined || (Number.isFinite(v) && Math.abs(v) <= 60),
+    ) &&
     Number.isInteger(s.cp) &&
     s.cp >= 0 &&
     s.cp <= 21
@@ -34,6 +38,8 @@ export function compactState(s) {
     z: Math.round(s.z * 100) / 100,
     yaw: Math.round(s.yaw * 1000) / 1000,
     speed: Math.round(s.speed * 100) / 100,
+    vx: Math.round((s.vx ?? -Math.sin(s.yaw) * s.speed) * 100) / 100,
+    vz: Math.round((s.vz ?? -Math.cos(s.yaw) * s.speed) * 100) / 100,
     cp: s.cp,
     brake: !!s.brake,
   };
@@ -59,13 +65,18 @@ export class Lobby {
     onChange = () => {},
     onRace = () => {},
     onEnd = () => {},
+    onBump = () => {},
     onError = () => {},
     options = {},
   } = {}) {
-    Object.assign(this, { onChange, onRace, onEnd, onError, options });
+    Object.assign(this, { onChange, onRace, onEnd, onBump, onError, options });
     this.players = {};
     this.connections = new Map();
     this.lastSeen = new Map();
+    this.contactTimes = new Map();
+    this.previousBodies = new Map();
+    this.seenBumps = new Set();
+    this.bumpSequence = 0;
     this.phase = "offline";
     this.race = null;
     this.offset = 0;
@@ -293,6 +304,19 @@ export class Lobby {
           }
         }
       } else {
+        if (
+          message.type === "bump" &&
+          this.phase === "race" &&
+          message.race === this.race?.id &&
+          typeof message.id === "string" &&
+          !this.seenBumps.has(message.id) &&
+          validBump(message.impacts?.[this.id])
+        ) {
+          this.seenBumps.add(message.id);
+          if (this.seenBumps.size > 256)
+            this.seenBumps.delete(this.seenBumps.values().next().value);
+          this.onBump(message.impacts[this.id]);
+        }
         if (message.type === "reject")
           return this.fail(String(message.message).slice(0, 100));
         if (
@@ -323,7 +347,10 @@ export class Lobby {
                 },
               ]),
           );
-          if (message.race?.id !== raceId) this.localState = null;
+          if (message.race?.id !== raceId) {
+            this.localState = null;
+            this.seenBumps.clear();
+          }
           this.race = message.race;
           this.phase = message.phase;
           if (this.phase === "lobby") {
@@ -378,23 +405,42 @@ export class Lobby {
       for (const c of this.connections.values())
         if (c.open) c.send({ type: "rename", name });
   }
-  triggerMonster(force = false) {
-    if (!this.isHost || this.phase !== "race") return;
-    const seconds = (Date.now() - this.race.startAt) / 1000;
-    const slot = force
-      ? Math.max(0, monsterSlot(seconds))
-      : monsterSlot(seconds);
-    if (slot < 0 || this.race.chaos?.id >= slot) return;
-    const leader = this.roster
-      .filter((p) => p.state && !p.finish)
-      .sort((a, b) => b.state.cp - a.state.cp)[0];
-    if (!leader && !force) return;
-    this.race.chaos = makeMonsterEvent(
-      slot,
-      Math.max(0, seconds),
-      leader?.state,
-    );
-    this.broadcast();
+  resolveTruckContacts() {
+    if (!this.isHost || this.phase !== "race" || Date.now() < this.race.startAt)
+      return;
+    const now = Date.now(),
+      bodies = this.roster.filter(
+        (p) =>
+          p.state &&
+          !p.finish &&
+          p.state.cp < 21 &&
+          now - (this.lastSeen.get(p.id) ?? now) < 2000,
+      );
+    for (let i = 0; i < bodies.length; i++)
+      for (let j = i + 1; j < bodies.length; j++) {
+        const a = bodies[i],
+          b = bodies[j],
+          key = [a.id, b.id].sort().join(":");
+        if (now - (this.contactTimes.get(key) ?? -Infinity) < 300) continue;
+        const impacts = truckContact(
+          a,
+          b,
+          this.previousBodies.get(a.id),
+          this.previousBodies.get(b.id),
+        );
+        if (!impacts) continue;
+        this.contactTimes.set(key, now);
+        const event = {
+          type: "bump",
+          race: this.race.id,
+          id: `${this.race.id}:${++this.bumpSequence}`,
+          impacts,
+        };
+        for (const c of this.connections.values())
+          if (c.open && this.players[c.peer]) c.send(event);
+        if (impacts[this.id]) this.onBump(impacts[this.id]);
+      }
+    for (const p of bodies) this.previousBodies.set(p.id, { ...p.state });
   }
   ready(value) {
     if (this.isHost) return;
@@ -415,6 +461,9 @@ export class Lobby {
       lighting,
     };
     this.race.seed = seedFrom(this.race.id);
+    this.contactTimes.clear();
+    this.previousBodies.clear();
+    this.seenBumps.clear();
     this.phase = "race";
     for (const p of this.roster) {
       p.state = null;
@@ -479,7 +528,7 @@ export class Lobby {
     this.checkPeerTimeouts();
     if (this.closed) return;
     if (this.isHost) {
-      this.triggerMonster();
+      this.resolveTruckContacts();
       if (
         this.phase === "race" ||
         Date.now() - (this.lastBroadcast || 0) >= 1000

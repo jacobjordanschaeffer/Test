@@ -5,12 +5,8 @@ import {
   roadblockBoxes,
   seedFrom,
   ChaosEffects,
-  monsterSlot,
-  makeMonsterEvent,
-  monsterPhase,
-  rubblePoints,
 } from "../src/chaos-rules.js";
-import { onRoad, resolveCollision } from "../src/route.js";
+import { onRoad, resolveCollision, isPavedSurface } from "../src/route.js";
 test("shared seed produces identical course hazards", () => {
   assert.deepEqual(
     makeHazards(seedFrom("race-a")),
@@ -20,11 +16,11 @@ test("shared seed produces identical course hazards", () => {
 });
 test("hazards stay on the road and barriers leave the middle lane open", () => {
   const hazards = makeHazards(94);
-  assert.equal(hazards.filter((h) => h.type === "boost").length, 21);
-  assert.equal(hazards.filter((h) => h.type === "pothole").length, 21);
+  assert.equal(hazards.filter((h) => h.type === "boost").length, 31);
+  assert.equal(hazards.filter((h) => h.type === "pothole").length, 31);
   const boxes = roadblockBoxes(hazards);
   assert.equal(boxes.length, 21);
-  for (const h of hazards) assert.ok(onRoad(h.x, h.z));
+  for (const h of hazards) assert.ok(isPavedSurface(h.x, h.z));
   for (const b of boxes) {
     assert.ok(resolveCollision(b.x, b.z, 1, boxes));
     assert.ok(Math.min(b.w, b.d) < 1);
@@ -48,24 +44,14 @@ test("boost, oil, pothole impacts expire and have per-hazard cooldowns", () => {
   effects.reset();
   assert.equal(effects.boostUntil, 0);
 });
-test("monster schedule, warning, rubble positions, and wave are shared and bounded", () => {
-  assert.equal(monsterSlot(17), -1);
-  assert.equal(monsterSlot(18), 0);
-  assert.equal(monsterSlot(60), 1);
-  const a = makeMonsterEvent(0, 18, { x: 0, z: -30, cp: 0 }),
-    b = makeMonsterEvent(0, 18, { x: 0, z: -30, cp: 0 });
-  assert.deepEqual(a, b);
-  assert.ok(onRoad(a.x, a.z));
-  assert.equal(monsterPhase(a, 19).warning, true);
-  assert.equal(monsterPhase(a, 22).warning, false);
-  assert.equal(monsterPhase(a, 25).wave, 12);
-  assert.equal(monsterPhase(a, 32).active, false);
-  assert.equal(rubblePoints(a).length, 3);
-  for (const p of rubblePoints(a)) assert.ok(onRoad(p.x, p.z));
-});
 
-test("free-roam monster events follow the nearby district", () => {
-  const event = makeMonsterEvent(0, 20, { x: 250, z: -1700 });
-  assert.ok(Math.hypot(event.x - 250, event.z + 1700) < 70);
-  assert.ok(onRoad(event.x, event.z));
+test("different seeds shuffle longitudinal positions as well as road lanes", () => {
+  const a = makeHazards(1),
+    b = makeHazards(2);
+  assert.ok(
+    a.some(
+      (h, i) => Math.abs(h.x - b[i]?.x) > 10 || Math.abs(h.z - b[i]?.z) > 10,
+    ),
+  );
+  assert.ok(a.some((h) => h.id.startsWith("side-")));
 });

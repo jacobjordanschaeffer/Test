@@ -59,25 +59,22 @@ try {
   await page.evaluate(() => gameQA.hazard("roadblock"));
   await page.waitForFunction(() => gameQA.getState().speed < 0);
   console.log("Roadblock collision stops and rebounds a real moving truck");
-  stage = "monster";
-  await page.evaluate(() => gameQA.monster());
-  await page.waitForFunction(() =>
-    document
-      .querySelector("#chaos-status")
-      ?.textContent.includes("GODZILLA INCOMING"),
-  );
-  await page.evaluate(async () => {
-    const { rubblePoints } = await import("/src/chaos-rules.js");
-    const p = rubblePoints(gameQA.getState().chaos.event)[0];
-    gameQA.teleport(p.x, p.z);
-    gameQA.advanceChaos(4.3);
-  });
+  stage = "grass";
+  await page.evaluate(() => gameQA.place(30, -60, 0, 24));
+  await page.keyboard.down("KeyW");
   await page.waitForFunction(
-    () => gameQA.getState().chaos.lastHit === "rubble",
+    () => gameQA.getState().grassAmount > 0.9 && gameQA.getState().speed < 10,
   );
+  await page.keyboard.up("KeyW");
+  assert.equal((await page.evaluate(() => gameQA.getState())).surface, "grass");
+  await page.evaluate(() => gameQA.place(0, -60, 0, 10));
+  await page.keyboard.down("KeyW");
+  await page.waitForFunction(() => gameQA.getState().speed > 20);
+  await page.keyboard.up("KeyW");
+  console.log("Grass slows the truck and road speed recovers");
+  await page.evaluate(() => gameQA.advanceChaos(200));
   await page.evaluate(() => gameQA.renderFrame());
-  await page.screenshot({ path: "/tmp/tokyo-chaos.png" });
-  console.log("Monster warning and rubble impact work and render");
+  console.log("Hazards render without monster events");
   assert.deepEqual(errors, []);
 } catch (error) {
   console.error(

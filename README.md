@@ -63,7 +63,7 @@ The expected URL after a successful deployment is `https://jacobjordanschaeffer.
 
 Choose **Race with friends**, enter a driver name, and **Create a lobby**. Share **Copy invite link** or the seven-character code. Friends open the same website and join the room. Everyone selects **Ready to race**, then the host selects **Start race**. Up to six drivers share the same course, countdown, visible trucks, minimap markers, and live standings. Choose a truck and paint in the Garage before joining.
 
-Trucks pass through each other to keep casual racing smooth despite network latency. Race time continues if you pause. The host can return everyone to the lobby for a rematch; leaving the host's browser closes the room. Rooms cannot be joined after a race has started. Results update while the remaining drivers finish. This is casual, client-simulated racing, not cheat-resistant ranked competition.
+Multiplayer trucks now have physical contact: the host resolves body collisions and sends both drivers reliable separation and momentum impulses. Race time continues if you pause. The host can return everyone to the lobby for a rematch; leaving the host's browser closes the room. Rooms cannot be joined after a race has started. Results update while the remaining drivers finish. This is casual, client-simulated racing, not cheat-resistant ranked competition.
 
 Single-player remains offline-capable after assets load. Multiplayer needs the public PeerJS signaling service (`0.peerjs.com`) and browser WebRTC connections, with Google's public STUN service used for NAT discovery. No player accounts or API keys are needed. The service has no guaranteed uptime, and some school/work networks, VPNs, firewalls, or NAT configurations block peer connections. There is no configured TURN relay or host migration; if a connection times out, use another network or play solo. Keep room codes between your friends.
 
@@ -73,21 +73,17 @@ Start `npm run dev -- --port 5173` and `npm run signal:test` in separate termina
 
 The GitHub Pages workflow runs the multiplayer browser suite on GitHub's hosted runner with both local and public signaling before deploying. The managed cloud onboarding browser disables non-proxied WebRTC UDP by policy, so it cannot complete this end-to-end test locally; its passing unit checks are distinct from the hosted browser result. Set `TEST_PUBLIC_PEER=1` to test the same browser flow using the public signaling service instead of the local server, where network policy permits.
 
-## Arcade chaos update
+## Road handling and randomized hazards
 
-Drivers can type their own name before creating or joining a room, or change it with **Your driver name → Save name** inside the lobby. Names are remembered in that browser and synchronized to the roster and standings. Names can be edited until the race starts.
+Drivers can enter a name before joining or use **Your driver name → Save name** in the lobby. Names are remembered in that browser and synchronized to the roster and standings until the race starts.
 
-Every district now has interactive arcade hazards:
+Grass adds drag, reduces acceleration, and limits the truck to roughly 30 km/h. The penalty blends in and clears on returning to pavement. Main roads, sidewalks, side streets, and bridges remain paved driving surfaces.
 
-- **Cyan boost pads:** a temporary acceleration and top-speed boost.
-- **Potholes:** a speed penalty and suspension/camera bounce.
-- **Oil slicks:** reduced tire grip for a short period; ease off the steering.
-- **Striped roadblocks:** solid partial-lane barriers with room to pass.
-- **Godzilla events:** an original procedural kaiju appears alongside the road. Amber rings warn where rubble will fall. Dodge the rubble and expanding atomic shockwave. The event clears after fourteen seconds, and another can happen about forty-two seconds later.
+Each run shuffles boost pads and potholes along both the main course and side streets, changing longitudinal position, lane, and order. Multiplayer shares one seed so all drivers see the same layout. Cyan boosts temporarily increase acceleration and top speed, potholes slow and bounce the truck, oil reduces grip, and partial-lane roadblocks remain solid. Monster events have been removed.
 
-Chaos is enabled in both solo modes and friend races. Multiplayer uses a shared course seed and host-broadcast monster event positions/timestamps. The host targets the leading checkpoint area, and every browser sees the same attack; vehicle impacts are simulated locally as part of casual racing. Boosts, oil, and impacts expire; warnings give drivers a chance to dodge, and roadblocks leave a passing lane.
+Multiplayer trucks use oriented collision bodies. The host resolves contact, sends both drivers reliable impulses, and applies a short contact cooldown to reduce jitter. High-speed crossings are checked between network samples; reset teleports do not sweep into distant racers. Pushes cannot move trucks directly through solid buildings. Collisions are disabled during countdown and for finished racers. This is arcade contact over a peer connection: latency can still cause visible position correction.
 
-`npm test` includes deterministic hazard generation, effect duration/cooldown, host scheduling, name editing, and network message checks. With Vite running, `npm run test:chaos` exercises actual truck boost speed, pothole/oil effects, roadblock collision, monster warnings, and rubble rendering/impact. The hosted multiplayer suite also checks name changes and identical hazard/event data across independent browsers before deployment.
+`npm test` covers surface handling, randomized placement, collision response and momentum transfer, swept contact, scenery protection, and network event deduplication. `npm run test:chaos` checks real driving effects and grass slowdown/recovery. The hosted multiplayer suite checks both drivers receive a contact event as well as identical hazard layouts before deployment.
 
 ## Connection stability and graphics
 

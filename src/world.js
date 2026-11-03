@@ -1,6 +1,6 @@
 import * as T from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { route, onRoad, indexCollisions } from "./route.js";
+import { route, onRoad, indexCollisions, mainRoadWidth } from "./route.js";
 import { makeTruck } from "./trucks.js";
 export function buildWorld(scene) {
   const boxes = [],
@@ -37,7 +37,7 @@ export function buildWorld(scene) {
     const a = route[i - 1],
       b = route[i],
       len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    const width = i < 7 ? 16 : i < 12 ? 23 : 21;
+    const width = mainRoadWidth(i);
     const walk = box(
       width + 6,
       0.15,

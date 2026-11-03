@@ -1,6 +1,4 @@
-import { route, distanceToSegment } from "./route.js";
-export const MONSTER_INTERVAL = 42;
-export const MONSTER_FIRST = 18;
+import { route, sideStreets } from "./route.js";
 export function seedFrom(value) {
   let seed = 2166136261;
   for (const c of String(value))
@@ -12,31 +10,47 @@ export function makeHazards(seed = 1) {
   const random = () =>
     (n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296;
   const hazards = [];
-  for (let i = 1; i < route.length; i++) {
-    const a = route[i - 1],
-      b = route[i],
-      length = Math.hypot(b[0] - a[0], b[1] - a[1]),
+  const segments = [
+    ...route
+      .slice(1)
+      .map((b, i) => ({ a: route[i], b, id: String(i + 1), main: true })),
+    ...sideStreets
+      .slice(0, 10)
+      .map(([a, b], i) => ({ a, b, id: `side-${i}`, main: false })),
+  ];
+  for (const { a, b, id, main } of segments) {
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]),
       dx = (b[0] - a[0]) / length,
       dz = (b[1] - a[1]) / length,
-      angle = Math.atan2(dx, dz);
-    const side = random() > 0.5 ? 1 : -1;
-    for (const [type, t, lateral] of [
-      ["boost", 0.28, -side * 3.8],
-      ["pothole", 0.49, side * 3.8],
-      ["roadblock", 0.7, side * 4.3],
-      ...(i % 3 === 0 ? [["oil", 0.84, -side * 3.5]] : []),
-    ]) {
-      const x = a[0] + dx * length * t + dz * lateral,
-        z = a[1] + dz * length * t - dx * lateral;
+      angle = Math.atan2(dx, dz),
+      side = random() > 0.5 ? 1 : -1;
+    const types = main
+      ? ["boost", "pothole", "roadblock", ...(random() > 0.65 ? ["oil"] : [])]
+      : ["boost", "pothole"];
+    // Shuffle separated slots so longitudinal position, lane, and order all change per run.
+    const slots = types.map(
+      (_, i) => (i + 1) / (types.length + 1) + (random() - 0.5) * 0.08,
+    );
+    for (let i = slots.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [slots[i], slots[j]] = [slots[j], slots[i]];
+    }
+    types.forEach((type, i) => {
+      const t = Math.max(30 / length, Math.min(1 - 30 / length, slots[i]));
+      const lateral =
+        type === "roadblock"
+          ? side * 4.3
+          : (random() > 0.5 ? 1 : -1) *
+            (main ? 2.9 + random() * 0.9 : 1.8 + random() * 0.4);
       hazards.push({
-        id: `${i}-${type}`,
+        id: `${id}-${type}`,
         type,
-        x,
-        z,
+        x: a[0] + dx * length * t + dz * lateral,
+        z: a[1] + dz * length * t - dx * lateral,
         angle,
         radius: type === "boost" ? 2.4 : type === "oil" ? 2.1 : 1.65,
       });
-    }
+    });
   }
   return hazards;
 }
@@ -49,85 +63,6 @@ export function roadblockBoxes(hazards) {
       w: Math.abs(Math.cos(h.angle)) > 0.5 ? 3.6 : 0.9,
       d: Math.abs(Math.cos(h.angle)) > 0.5 ? 0.9 : 3.6,
     }));
-}
-export function monsterSlot(seconds) {
-  return seconds < MONSTER_FIRST
-    ? -1
-    : Math.floor((seconds - MONSTER_FIRST) / MONSTER_INTERVAL);
-}
-export function makeMonsterEvent(
-  index,
-  startAt,
-  state = { x: 0, z: 7, cp: 0 },
-) {
-  const nearest = () => {
-    let segment = 1,
-      best = Infinity;
-    for (let i = 1; i < route.length; i++) {
-      const distance = distanceToSegment(
-        state.x,
-        state.z,
-        route[i - 1],
-        route[i],
-      );
-      if (distance < best) {
-        best = distance;
-        segment = i;
-      }
-    }
-    return segment;
-  };
-  const segment = Number.isInteger(state.cp)
-    ? Math.max(1, Math.min(route.length - 1, state.cp + 1))
-    : nearest();
-  const a = route[segment - 1],
-    b = route[segment],
-    dx = b[0] - a[0],
-    dz = b[1] - a[1],
-    len = Math.hypot(dx, dz),
-    t = Math.max(
-      0.3,
-      Math.min(
-        0.85,
-        ((state.x - a[0]) * dx + (state.z - a[1]) * dz) / (len * len) +
-          65 / len,
-      ),
-    );
-  return {
-    id: index,
-    startAt,
-    x: a[0] + dx * t,
-    z: a[1] + dz * t,
-    angle: Math.atan2(dx, dz),
-    side: index % 2 === 0 ? 1 : -1,
-  };
-}
-export function monsterPhase(event, seconds) {
-  if (!event) return { age: -1, warning: false, active: false, wave: -1 };
-  const age = seconds - event.startAt;
-  return {
-    age,
-    warning: age >= 0 && age < 3,
-    active: age >= 0 && age < 14,
-    wave: age >= 6 && age < 8 ? (age - 6) * 12 : -1,
-  };
-}
-export function rubblePoints(event) {
-  return [-3, 0, 3].map((offset, i) => {
-    const across = event.side * (i === 0 ? 4.5 : i === 1 ? 1 : -2.5),
-      along = offset * 1.8;
-    return {
-      x:
-        event.x +
-        Math.cos(event.angle) * across +
-        Math.sin(event.angle) * along,
-      z:
-        event.z -
-        Math.sin(event.angle) * across +
-        Math.cos(event.angle) * along,
-      radius: 1.7,
-    };
-  });
 }
 export class ChaosEffects {
   constructor() {

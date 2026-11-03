@@ -60,3 +60,24 @@ test("spatial collision index agrees with direct obstacle tests", () => {
         resolveCollision(x, z, 1.05, boxes),
       );
 });
+
+test("grass reduces speed and acceleration while paved side streets stay fast", () => {
+  const a = { ...fresh(), x: 30, z: -60, speed: 24, vz: -24 },
+    b = { ...fresh(), x: 0, z: -60, speed: 24, vz: -24 };
+  steps(a, forward, 3);
+  steps(b, forward, 3);
+  assert.ok(a.speed < 10);
+  assert.ok(a.offroad > 0.9);
+  assert.ok(b.speed > 20);
+  const side = {
+    ...fresh(),
+    x: 50,
+    z: -280,
+    yaw: -Math.PI / 2,
+    speed: 20,
+    vx: 20,
+  };
+  steps(side, forward, 2);
+  assert.ok(side.speed > 20);
+  assert.ok(side.offroad < 0.1);
+});

@@ -116,3 +116,31 @@ export function indexCollisions(boxes, cell = 40) {
   boxes.spatial = { grid, cell };
   return boxes;
 }
+
+export function mainRoadWidth(segment) {
+  return segment < 7 ? 16 : segment < 12 ? 23 : 21;
+}
+function surfaceRect(a, b, width, endPadding = width / 2) {
+  const horizontal = a[1] === b[1],
+    ex = horizontal ? endPadding : width / 2,
+    ez = horizontal ? width / 2 : endPadding;
+  return {
+    minX: Math.min(a[0], b[0]) - ex,
+    maxX: Math.max(a[0], b[0]) + ex,
+    minZ: Math.min(a[1], b[1]) - ez,
+    maxZ: Math.max(a[1], b[1]) + ez,
+  };
+}
+const pavedSurfaces = [
+  ...route
+    .slice(1)
+    .map((b, i) => surfaceRect(route[i], b, mainRoadWidth(i + 1) + 6)),
+  ...sideStreets.map(([a, b], i) =>
+    surfaceRect(a, b, i < 10 ? 13 : i < 12 ? 16 : 18, i === 12 ? 8 : 0),
+  ),
+];
+export function isPavedSurface(x, z) {
+  return pavedSurfaces.some(
+    (r) => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ,
+  );
+}
